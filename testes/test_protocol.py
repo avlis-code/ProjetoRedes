@@ -135,10 +135,14 @@ class TestSocketBloqueante(unittest.TestCase):
         self.assertFalse(cm.exception.fatal)
         a.sendall(P.codificar(P.ping(2))[4:])
         self.assertEqual(leitor.read_msg()["t"], 2)
-        a.sendall(b"x" * (P.MAX_LINHA + 1))
+        # numa thread: o buffer do socketpair no macOS é menor que 16 KiB e o sendall travaria
+        import threading
+        envio = threading.Thread(target=a.sendall, args=(b"x" * (P.MAX_LINHA + 1),))
+        envio.start()
         with self.assertRaises(P.ProtocolError) as cm:
             leitor.read_msg()
         self.assertTrue(cm.exception.fatal)
+        envio.join(timeout=5)
         a.close()
         self.assertIsNone(P.LineReader(b).read_msg())
         b.close()
