@@ -13,7 +13,11 @@ Python 3.8+ só com a biblioteca padrão. Segue `protocolo/protocolo.md` (rascun
 | `lobby_link.py` | Lado cliente do lobby: `ConexaoLobby` (pedido → resposta), `LobbyCliente` (usado pelo host, numa thread própria) e `LobbyStub` (para rodar sem lobby). |
 | `cliente_teste.py` | Jogador de teste: conecta direto no host, manda `HELLO` e dirige com um bot. Simula falhas. |
 | `bot.py`, `tela.py` | Piloto automático e desenho da arena no terminal. |
-| `testes/` | `test_tron.py` e `test_protocol.py` (sem rede), `test_integracao.py` e `test_lobby.py` (localhost). |
+| `cenarios.py` | Cenários de falha do relatório: sobe lobby, host e jogadores, provoca a falha (socket fechado, travamento, `BYE`, `SIGTERM`, `SIGKILL`, `SIGSTOP`) e mede quem detectou o quê e em quanto tempo. |
+| `rede.py` | Diagnóstico para várias máquinas: IPs locais, porta de teste e `PING`/`PONG` com explicação do erro (firewall, porta fechada, WSL). |
+| `scripts/` | `lobby`, `host` e `jogador` em `.sh` e `.bat`, e `liberar_firewall_windows.bat`. |
+| `relatorio/` | Relatório; cada parte escreve a sua seção. |
+| `testes/` | `test_tron.py` e `test_protocol.py` (sem rede), `test_integracao.py`, `test_lobby.py` e `test_falhas.py` (localhost). |
 
 ## Rodar com o lobby (fluxo completo)
 
@@ -69,7 +73,29 @@ Queda do host: Ctrl+C (ou `kill`) no host manda `GAME_ABORTED host_quit` a todos
 python3 -m unittest discover -s testes -v
 ```
 
-62 testes, cerca de 15 s (os de integração sobem processos reais em localhost, inclusive a queda do lobby no meio da partida).
+73 testes, cerca de 2 min. Os de integração sobem processos reais em localhost; `test_falhas.py` roda todos os cenários de `cenarios.py` e leva a maior parte do tempo, porque os timeouts são os de verdade (3 s). Para pular esses: `python3 -m unittest testes.test_tron testes.test_protocol testes.test_integracao testes.test_lobby`.
+
+## Cenários de falha e várias máquinas
+
+```bash
+python3 cenarios.py --listar        # 11 cenários
+python3 cenarios.py                 # roda todos; logs e resumo.md em resultados/<data_hora>/
+python3 cenarios.py host_trava      # só um
+```
+
+O `resumo.md` traz as checagens e as medidas (tempo de detecção, ciclo da eliminação, RTT) prontas para o relatório. `host_morre`, `host_trava` e `lobby_trava` usam sinais do Unix e são pulados no Windows.
+
+Em várias máquinas (roteiro completo em `relatorio/relatorio.md`, seção 6.4):
+
+```bash
+python3 rede.py ip                          # em cada máquina
+scripts/lobby.sh                            # máquina do lobby
+scripts/host.sh 192.168.0.5 Ana             # máquina do host
+scripts/jogador.sh 192.168.0.5 Beto         # demais (aceita --cair-no-ciclo etc.)
+python3 rede.py testar 192.168.0.5 5000     # se algo não conectar
+```
+
+No Windows use os `.bat` e rode `scripts\liberar_firewall_windows.bat` como administrador. Os scripts de jogador usam o `cliente_teste.py`; quando o cliente com teclado da parte 3 estiver pronto, é só trocar o arquivo neles.
 
 ## Como o host fala com o lobby
 

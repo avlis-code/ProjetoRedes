@@ -230,14 +230,17 @@ class Jogador:
     def simular_falha(self, ciclo: int) -> bool:
         a = self.args
         if a.cair_no_ciclo is not None and ciclo >= a.cair_no_ciclo:
+            log.warning(f"FALHA SIMULADA queda no ciclo {ciclo}")
             print(f"FALHA SIMULADA queda no ciclo {ciclo}", flush=True)
             self.sock.close()
             sys.exit(3)
         if a.travar_no_ciclo is not None and ciclo >= a.travar_no_ciclo:
+            log.warning(f"FALHA SIMULADA travado no ciclo {ciclo} por {a.travar_por} s")
             print(f"FALHA SIMULADA travado no ciclo {ciclo} por {a.travar_por} s", flush=True)
             time.sleep(a.travar_por)  # não lê nem manda nada, nem PING
             sys.exit(3)
         if a.sair_no_ciclo is not None and ciclo >= a.sair_no_ciclo:
+            log.warning(f"FALHA SIMULADA BYE no ciclo {ciclo}")
             print(f"FALHA SIMULADA BYE no ciclo {ciclo}", flush=True)
             self.enviar(P.bye("cliente de teste saiu"))
             self.sock.close()
@@ -247,6 +250,7 @@ class Jogador:
     def fim_abortado(self, motivo: str) -> None:
         if self.estado == "FIM":
             return
+        log.warning("partida abortada: %s", motivo)
         print(f"ABORTADA {motivo}", flush=True)
         self.estado = "FIM"
         self.saida = 1
