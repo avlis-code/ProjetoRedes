@@ -1,284 +1,292 @@
 #!/usr/bin/env python3
+"""Servidor de lobby (seções 3.1 e 4 do protocolo).
+
+Adaptado do lobby.py original do colega: mantém a estrutura dele (uma thread
+por cliente, um único lock para as tabelas, fila de saída por cliente e envio
+fora do lock), mas segue o protocolo.md:
+
+  - usa o protocol.py compartilhado (framing, validação, códigos de erro);
+  - é estritamente pedido -> resposta: cada pedido recebe exatamente uma
+    resposta e o lobby nunca envia nada sem ter sido pedido;
+  - quem sabe a lista real de jogadores é o host (MATCH_UPDATE, decisão D7);
+    o lobby só guarda uma cópia para mostrar no MATCH_LIST;
+  - o endereço do host é entregue já no JOIN_OK; o lobby nunca participa da
+    partida e pode cair sem afetar quem já está jogando.
+
+Uso:  python3 lobby.py --porta 5000
+"""
+
+from __future__ import annotations
 
 import argparse
 import ipaddress
 import logging
-import re
 import socket
 import threading
 from collections import deque
 
-from protocol import LineReader, ProtocolError, send_msg
-
-MIN_PLAYERS = 3
-MAX_PLAYERS = 4
-NAME_RE = re.compile(r"[A-Za-z0-9_-]{1,20}")
-
-PERMITIDAS = {
-    "NAO_REGISTRADO": {"REGISTER", "PING"},
-    "REGISTRADO": {"LIST_MATCHES", "CREATE_MATCH", "JOIN_MATCH", "PING"},
-    "EM_PARTIDA": {"START", "LEAVE", "PING"},
-    "INICIADA": {"LEAVE", "PING"},
-}
-TIPOS_CONHECIDOS = set().union(*PERMITIDAS.values())
+import protocol as P
 
 log = logging.getLogger("lobby")
 
 
-def erro(motivo):
-    return {"type": "ERROR", "reason": motivo}
-
-
-class Client:
-    def __init__(self, conn, addr):
+class Cliente:
+    def __init__(self, conn: socket.socket, endereco):
         self.conn = conn
-        self.addr = addr
-        self.name = None
-        self.state = "NAO_REGISTRADO"
-        self.match = None
-        self.outbox = deque()
-        self.send_lock = threading.Lock()
+        self.endereco = endereco
+        self.nome: str | None = None
+        self.estado = "NAO_REGISTRADO"
+        self.partida: Partida | None = None   # partida que este cliente hospeda
+        self.erros = 0
+        self.saida: deque = deque()
+        self.trava_envio = threading.Lock()
 
-    def flush(self):
-        with self.send_lock:
-            while self.outbox:
+    def descarregar(self) -> None:
+        with self.trava_envio:
+            while self.saida:
                 try:
-                    send_msg(self.conn, self.outbox.popleft())
+                    P.send_msg(self.conn, self.saida.popleft())
                 except OSError:
-                    self.outbox.clear()
+                    self.saida.clear()
                     return
 
+    def __str__(self):
+        return self.nome or f"{self.endereco[0]}:{self.endereco[1]}"
 
-class Match:
-    def __init__(self, match_id, title, host, host_ip, host_port):
+
+class Partida:
+    def __init__(self, match_id, nome, host: Cliente, host_ip, host_porta, max_jogadores):
         self.id = match_id
-        self.title = title
+        self.nome = nome
         self.host = host
         self.host_ip = host_ip
-        self.host_port = host_port
-        self.players = [host]
+        self.host_porta = host_porta
+        self.max_jogadores = max_jogadores
+        self.jogadores = [host.nome]   # cópia; atualizada pelo MATCH_UPDATE
         self.status = "ABERTA"
 
-    def resumo(self):
-        return {
-            "match_id": self.id,
-            "title": self.title,
-            "host": self.host.name,
-            "players": [p.name for p in self.players],
-            "max_players": MAX_PLAYERS,
-            "status": self.status,
-        }
+    def resumo(self) -> dict:
+        return {"match_id": self.id, "match_name": self.nome, "host": self.host.nome,
+                "players": list(self.jogadores), "max_players": self.max_jogadores,
+                "status": self.status}
 
 
-def endereco_do_host(match, destino):
-    ip = match.host_ip
-    if ipaddress.ip_address(ip).is_loopback:
-        ip = destino.conn.getsockname()[0]
-    return {"ip": ip, "port": match.host_port}
+def eh_loopback(ip: str) -> bool:
+    try:
+        return ipaddress.ip_address(ip).is_loopback
+    except ValueError:
+        return False
 
 
 class Lobby:
     def __init__(self):
-        self.lock = threading.Lock()
-        self.jogadores = {}
-        self.partidas = {}
+        self.trava = threading.Lock()
+        self.clientes: dict[str, Cliente] = {}   # nome -> cliente registrado
+        self.partidas: dict[int, Partida] = {}
         self.proximo_id = 1
         self.tratadores = {
             "REGISTER": self._register,
             "LIST_MATCHES": self._list_matches,
             "CREATE_MATCH": self._create_match,
             "JOIN_MATCH": self._join_match,
-            "START": self._start,
-            "LEAVE": self._leave,
-            "PING": lambda c, m: [(c, {"type": "PONG"})],
+            "MATCH_UPDATE": self._match_update,
+            "START_MATCH": self._start_match,
+            "CANCEL_MATCH": self._cancel_match,
+            "END_MATCH": self._end_match,
+            "PING": lambda c, m: P.pong(m["t"]),
         }
 
-    def _despachar(self, c, msg):
-        t = msg["type"]
-        if t not in TIPOS_CONHECIDOS:
-            return [(c, erro(f"tipo desconhecido: {t}"))]
-        if t not in PERMITIDAS[c.state]:
-            return [(c, erro(f"mensagem {t} inesperada no estado {c.state}"))]
-        return self.tratadores[t](c, msg)
+    # ------------------------------------------------------------------ envio
+    def responder(self, c: Cliente, msg: dict) -> None:
+        c.saida.append(msg)
+        c.descarregar()
 
-    def _enfileirar(self, out):
-        """Põe as mensagens nas filas (lock preso). Devolve os destinatários a descarregar."""
-        destinos = []
-        for destino, msg in out:
-            destino.outbox.append(msg)
-            if destino not in destinos:
-                destinos.append(destino)
-        return destinos
-
-    def processar(self, c, msg):
-        with self.lock:
-            destinos = self._enfileirar(self._despachar(c, msg))
-        for d in destinos:
-            d.flush()
-
-    def responder_erro(self, c, motivo):
-        with self.lock:
-            destinos = self._enfileirar([(c, erro(motivo))])
-        for d in destinos:
-            d.flush()
+    # ------------------------------------------------------------------ despacho
+    def processar(self, c: Cliente, msg: dict) -> dict | None:
+        """Devolve a resposta (ou None para um ERROR recebido)."""
+        tipo = msg["type"]
+        if tipo == "ERROR":  # nunca se responde ERROR a ERROR
+            log.warning("%s mandou ERROR: %s", c, msg)
+            return None
+        with self.trava:
+            if tipo not in P.LOBBY_PERMITIDAS[c.estado]:
+                return P.erro(P.UNEXPECTED, f"{tipo} não é permitido no estado {c.estado}", tipo)
+            return self.tratadores[tipo](c, msg)
 
     def _register(self, c, msg):
-        name = msg.get("name")
-        if not isinstance(name, str) or not NAME_RE.fullmatch(name):
-            return [(c, erro("nome inválido (use 1 a 20 letras, números, _ ou -)"))]
-        if name in self.jogadores:
-            return [(c, erro("nome já em uso"))]
-        c.name = name
-        c.state = "REGISTRADO"
-        self.jogadores[name] = c
-        log.info("registrado: %s (%s:%s)", name, *c.addr)
-        return [(c, {"type": "REGISTERED", "name": name})]
+        nome = msg["name"]
+        if msg["version"] != P.VERSAO:
+            return P.erro(P.BAD_VERSION, f"versão {msg['version']} não suportada (use {P.VERSAO})",
+                          "REGISTER")
+        if not P.nome_valido(nome):
+            return P.erro(P.BAD_NAME, "nome deve ter 1-16 caracteres de [A-Za-z0-9_-]", "REGISTER")
+        if nome in self.clientes:
+            return P.erro(P.NAME_TAKEN, f"o nome {nome} já está em uso", "REGISTER")
+        c.nome = nome
+        c.estado = "REGISTRADO"
+        self.clientes[nome] = c
+        log.info("registrado: %s (%s:%s)", nome, *c.endereco[:2])
+        return {"type": "REGISTER_OK", "name": nome}
 
     def _list_matches(self, c, msg):
-        lista = [m.resumo() for m in self.partidas.values()]
-        return [(c, {"type": "MATCH_LIST", "matches": lista})]
+        return {"type": "MATCH_LIST", "matches": [m.resumo() for m in self.partidas.values()]}
 
     def _create_match(self, c, msg):
-        port = msg.get("port")
-        if not isinstance(port, int) or isinstance(port, bool) or not 1024 <= port <= 65535:
-            return [(c, erro("'port' deve ser um inteiro entre 1024 e 65535"))]
-        title = msg.get("title", f"Partida de {c.name}")
-        if not isinstance(title, str) or not 1 <= len(title) <= 40:
-            return [(c, erro("'title' deve ter de 1 a 40 caracteres"))]
-       
-        host_ip = msg.get("host_ip", c.addr[0])
-        try:
-            if not isinstance(host_ip, str):
-                raise ValueError
-            ipaddress.ip_address(host_ip)
-        except ValueError:
-            return [(c, erro("'host_ip' inválido"))]
-
-        m = Match(self.proximo_id, title, c, host_ip, port)
+        # IP do host = IP de origem da conexão, não um IP informado (seção 3.1)
+        host_ip = c.endereco[0]
+        if eh_loopback(host_ip):
+            anunciado = msg.get("advertise_ip")
+            if anunciado is not None:
+                try:
+                    ipaddress.ip_address(anunciado)
+                except ValueError:
+                    return P.erro(P.BAD_FIELD, "advertise_ip não é um IP válido", "CREATE_MATCH")
+                host_ip = anunciado
+            else:
+                log.info("%s criou partida por 127.0.0.1 sem advertise_ip: cada jogador "
+                         "receberá o IP desta máquina pelo qual ele chegou ao lobby", c)
+        nome = msg.get("match_name") or f"sala de {c.nome}"
+        m = Partida(self.proximo_id, nome, c, host_ip, msg["port"], msg.get("max_players", 4))
         self.proximo_id += 1
         self.partidas[m.id] = m
-        c.match = m
-        c.state = "EM_PARTIDA"
-        log.info("partida %d criada por %s (host %s:%d)", m.id, c.name, host_ip, port)
-        return [(c, {"type": "MATCH_CREATED", "match_id": m.id})]
+        c.partida = m
+        c.estado = "HOSPEDANDO_ABERTA"
+        log.info("partida %d '%s' criada por %s (host %s:%d)", m.id, nome, c, host_ip, m.host_porta)
+        return {"type": "MATCH_CREATED", "match_id": m.id, "host_ip": host_ip,
+                "host_port": m.host_porta}
 
     def _join_match(self, c, msg):
-        match_id = msg.get("match_id")
-        m = self.partidas.get(match_id) if isinstance(match_id, int) else None
+        m = self.partidas.get(msg["match_id"])
         if m is None:
-            return [(c, erro("partida não existe"))]
+            return P.erro(P.MATCH_NOT_FOUND, f"partida {msg['match_id']} não existe", "JOIN_MATCH")
         if m.status != "ABERTA":
-            return [(c, erro("partida já iniciada"))]
-        if len(m.players) >= MAX_PLAYERS:
-            return [(c, erro("partida cheia"))]
-        m.players.append(c)
-        c.match = m
-        c.state = "EM_PARTIDA"
-        log.info("%s entrou na partida %d", c.name, m.id)
-        out = [(c, {"type": "JOINED", "match_id": m.id,
-                    "players": [p.name for p in m.players]})]
-        out += [(p, {"type": "PLAYER_JOINED", "name": c.name}) for p in m.players if p is not c]
-        return out
+            return P.erro(P.MATCH_STARTED, "partida já iniciada", "JOIN_MATCH")
+        if len(m.jogadores) >= m.max_jogadores:
+            return P.erro(P.MATCH_FULL, f"partida cheia ({len(m.jogadores)}/{m.max_jogadores})",
+                          "JOIN_MATCH")
+        ip = m.host_ip
+        if eh_loopback(ip):
+            # Host na mesma máquina do lobby e sem advertise_ip: o IP pelo qual
+            # ESTE jogador chegou ao lobby também alcança o host (ideia do original).
+            ip = c.conn.getsockname()[0]
+        log.info("%s pediu para entrar na partida %d", c, m.id)
+        return {"type": "JOIN_OK", "match_id": m.id, "host": m.host.nome,
+                "host_ip": ip, "host_port": m.host_porta}
 
-    def _start(self, c, msg):
-        m = c.match
-        if m.host is not c:
-            return [(c, erro("só o host pode iniciar a partida"))]
-        if len(m.players) < MIN_PLAYERS:
-            return [(c, erro(f"são necessários pelo menos {MIN_PLAYERS} jogadores"))]
+    def _minha_partida(self, c, msg) -> Partida | dict:
+        m = c.partida
+        if m is None or msg["match_id"] != m.id:
+            return P.erro(P.NOT_HOST, f"você não é host da partida {msg['match_id']}", msg["type"])
+        return m
+
+    def _match_update(self, c, msg):
+        m = self._minha_partida(c, msg)
+        if isinstance(m, dict):
+            return m
+        m.jogadores = list(msg["players"])
+        log.info("partida %d: jogadores %s", m.id, m.jogadores)
+        return {"type": "UPDATE_OK"}
+
+    def _start_match(self, c, msg):
+        m = self._minha_partida(c, msg)
+        if isinstance(m, dict):
+            return m
         m.status = "INICIADA"
-        nomes = [p.name for p in m.players]
-        log.info("partida %d iniciada com %s", m.id, nomes)
-        out = []
-        for p in m.players:
-            p.state = "INICIADA"
-            out.append((p, {"type": "MATCH_STARTED", "match_id": m.id,
-                            "host": endereco_do_host(m, p), "players": nomes}))
-        return out
+        c.estado = "HOSPEDANDO_INICIADA"
+        log.info("partida %d iniciada com %s", m.id, m.jogadores)
+        return {"type": "START_OK", "match_id": m.id}
 
-    def _leave(self, c, msg):
-        log.info("%s saiu da partida", c.name)
-        out = self._sair_da_partida(c)
-        c.state = "REGISTRADO"
-        return out + [(c, {"type": "LEFT"})]
+    def _remover_partida(self, c: Cliente, motivo: str) -> None:
+        m, c.partida = c.partida, None
+        if m is not None:
+            self.partidas.pop(m.id, None)
+            log.info("partida %d removida (%s)", m.id, motivo)
 
-    def _sair_da_partida(self, c):
-        """Tira c da partida em que está. Devolve as notificações para os demais."""
-        m, c.match = c.match, None
-        if m is None:
-            return []
-        if c in m.players:
-            m.players.remove(c)
-        out = []
-        if m.status == "ABERTA":
-            if c is m.host:
-                del self.partidas[m.id]
-                log.info("partida %d cancelada (host saiu)", m.id)
-                for p in m.players:
-                    p.match = None
-                    p.state = "REGISTRADO"
-                    out.append((p, {"type": "MATCH_CANCELLED", "reason": "o host saiu"}))
-            else:
-                out = [(p, {"type": "PLAYER_LEFT", "name": c.name}) for p in m.players]
-        elif not m.players:
-            del self.partidas[m.id]
-        return out
+    def _cancel_match(self, c, msg):
+        m = self._minha_partida(c, msg)
+        if isinstance(m, dict):
+            return m
+        self._remover_partida(c, "cancelada pelo host")
+        c.estado = "REGISTRADO"
+        return {"type": "CANCEL_OK", "match_id": m.id}
 
-    def desconectar(self, c):
-        with self.lock:
-            destinos = self._enfileirar(self._sair_da_partida(c))
-            if c.name is not None and self.jogadores.get(c.name) is c:
-                del self.jogadores[c.name]
-        for d in destinos:
-            d.flush()
-    def atender(self, conn, addr, idle_timeout):
-        c = Client(conn, addr)
-        reader = LineReader(conn)
-        conn.settimeout(idle_timeout or None)
-        log.info("conexão de %s:%s", *addr)
+    def _end_match(self, c, msg):
+        m = self._minha_partida(c, msg)
+        if isinstance(m, dict):
+            return m
+        self._remover_partida(c, f"terminou, vencedor {msg.get('winner')}")
+        c.estado = "REGISTRADO"
+        return {"type": "END_OK", "match_id": m.id}
+
+    # ------------------------------------------------------------------ conexão
+    def desconectar(self, c: Cliente) -> None:
+        with self.trava:
+            # limpeza automática: host caiu -> partida sai da lista (o jogo não é afetado)
+            self._remover_partida(c, f"conexão do host {c} fechou")
+            if c.nome is not None and self.clientes.get(c.nome) is c:
+                del self.clientes[c.nome]
+
+    def atender(self, conn: socket.socket, endereco, inatividade: float) -> None:
+        c = Cliente(conn, endereco)
+        leitor = P.LineReader(conn)
+        conn.settimeout(inatividade or None)
+        log.info("conexão de %s:%s", *endereco[:2])
         try:
             while True:
                 try:
-                    msg = reader.read_msg()
-                except ProtocolError as e:
+                    msg = leitor.read_msg()
+                except P.ProtocolError as e:
                     if e.fatal:
-                        log.warning("%s: %s, fechando", addr, e)
+                        log.warning("%s: %s, fechando", c, e)
                         break
-                    self.responder_erro(c, str(e))
+                    resposta = e.como_mensagem()
+                else:
+                    if msg is None:
+                        break
+                    resposta = self.processar(c, msg)
+                if resposta is None:
                     continue
-                if msg is None:
+                if resposta["type"] == "ERROR":
+                    c.erros += 1
+                    log.info("%s: %s %s", c, resposta["code"], resposta["message"])
+                else:
+                    c.erros = 0
+                self.responder(c, resposta)
+                if c.erros >= P.MAX_ERROS:
+                    log.warning("%s: %d erros seguidos, desconectando", c, c.erros)
                     break
-                self.processar(c, msg)
         except socket.timeout:
-            log.info("%s sem atividade por %ss, desconectando", c.name or addr, idle_timeout)
+            log.info("%s sem atividade por %ss, desconectando", c, inatividade)
         except OSError as e:
-            log.info("%s: erro de conexão (%s)", c.name or addr, e)
+            log.info("%s: erro de conexão (%s)", c, e)
         finally:
             self.desconectar(c)
             conn.close()
-            log.info("desconectado: %s", c.name or addr)
+            log.info("desconectado: %s", c)
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Servidor de lobby")
-    ap.add_argument("--bind", default="0.0.0.0", help="endereço de escuta (padrão: todos)")
-    ap.add_argument("--port", type=int, default=5000)
-    ap.add_argument("--idle-timeout", type=float, default=60,
-                    help="segundos sem nenhuma mensagem antes de derrubar o cliente (0 = nunca)")
-    args = ap.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Servidor de lobby do Tron")
+    ap.add_argument("--ip", default="0.0.0.0", help="endereço de escuta (padrão: todos)")
+    ap.add_argument("--porta", type=int, default=5000)
+    ap.add_argument("--inatividade", type=float, default=60,
+                    help="segundos sem nenhuma mensagem antes de derrubar o cliente (0 = nunca). "
+                         "Clientes mandam PING a cada 10 s, então 60 s é folgado.")
+    args = ap.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [lobby] %(message)s",
+                        datefmt="%H:%M:%S")
 
     srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    srv.bind((args.bind, args.port))
+    srv.bind((args.ip, args.porta))
     srv.listen()
-    log.info("lobby escutando em %s:%d", args.bind, args.port)
+    log.info("lobby escutando em %s:%d", args.ip, args.porta)
 
     lobby = Lobby()
     try:
         while True:
-            conn, addr = srv.accept()
-            threading.Thread(target=lobby.atender, args=(conn, addr, args.idle_timeout),
+            conn, endereco = srv.accept()
+            threading.Thread(target=lobby.atender, args=(conn, endereco, args.inatividade),
                              daemon=True).start()
     except KeyboardInterrupt:
         log.info("encerrando lobby")
