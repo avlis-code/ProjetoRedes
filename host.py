@@ -20,6 +20,7 @@ import argparse
 import logging
 import queue
 import random
+import select
 import selectors
 import signal
 import socket
@@ -81,10 +82,18 @@ class Conexao:
 # Entrada local do jogador do host (a do host não passa pela rede)
 # ---------------------------------------------------------------------------
 class EntradaNenhuma:
+    ativo = False
+
     def direcao(self, partida: Partida, pid: int) -> str | None:
         return None
 
-    def fechar(self):
+    def iniciar_jogo(self, host) -> None:
+        pass
+
+    def atualizar(self, host) -> None:
+        pass
+
+    def fechar(self, host=None):
         pass
 
 
@@ -95,40 +104,6 @@ class EntradaBot(EntradaNenhuma):
     def direcao(self, partida, pid):
         m = partida.motos[pid]
         return bot.decidir(partida.celula_livre, m.x, m.y, m.dir, self.rng)
-
-
-class EntradaTeclado(EntradaNenhuma):
-    """W A S D no terminal (só Unix). Lê sem bloquear a cada ciclo."""
-    TECLAS = {"w": "UP", "s": "DOWN", "a": "LEFT", "d": "RIGHT"}
-
-    def __init__(self):
-        self.fd = sys.stdin.fileno()
-        self.antigo = None
-        self.pendentes: list[str] = []
-
-    def direcao(self, partida, pid):
-        import select
-        if self.antigo is None:
-            # só entra no modo "tecla a tecla" quando o jogo começa, para não
-            # atrapalhar os comandos iniciar/cancelar digitados na sala
-            import termios
-            import tty
-            self.antigo = termios.tcgetattr(self.fd)
-            tty.setcbreak(self.fd)
-        while select.select([self.fd], [], [], 0)[0]:
-            ch = sys.stdin.read(1).lower()
-            if ch in self.TECLAS:
-                self.pendentes.append(self.TECLAS[ch])
-        # mesma regra de fila que os jogadores remotos: o host enfileira tudo
-        for d in self.pendentes:
-            partida.enfileirar_virada(pid, d, partida.ciclo)
-        self.pendentes.clear()
-        return None
-
-    def fechar(self):
-        if self.antigo is not None:
-            import termios
-            termios.tcsetattr(self.fd, termios.TCSADRAIN, self.antigo)
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +163,9 @@ class Host:
         self.abortada = False
         self.manual = args.iniciar_com is None and not args.jogadores
         self.comandos: Comandos | None = None
+        self.game_start: dict | None = None
+        self.inicio_contagem = 0.0
+        self.ultimo_state: dict | None = None
 
     # ------------------------------------------------------------------ início
     def abrir(self) -> None:
@@ -237,6 +215,7 @@ class Host:
                 agora = time.monotonic()
                 self._manutencao(agora)
                 self._avancar_fase(agora)
+                self.entrada.atualizar(self)
                 if self.fase == FIM and agora >= self.fim_em:
                     break
         except KeyboardInterrupt:
@@ -548,15 +527,18 @@ class Host:
         for c in self.sala.values():
             if c is not None:
                 c.estado = JOGANDO
-        self._difundir({"type": "GAME_START",
-                        "arena": {"width": self.args.largura, "height": self.args.altura},
-                        "tick_ms": self.args.tick_ms, "start_in_ms": self.args.start_in_ms,
-                        "players": self.partida.jogadores_inicio_json()})
+        self.game_start = {"type": "GAME_START",
+                           "arena": {"width": self.args.largura, "height": self.args.altura},
+                           "tick_ms": self.args.tick_ms, "start_in_ms": self.args.start_in_ms,
+                           "players": self.partida.jogadores_inicio_json()}
+        self._difundir(self.game_start)
         t0 = time.monotonic()
+        self.inicio_contagem = t0
         self.prox_tick = t0 + (self.args.start_in_ms + self.args.tick_ms) / 1000
         self.ultimo_grid = self.partida.grid_texto()
         log.info("GAME_START com %s; ciclo 1 em %d ms", self.nomes_sala(),
                  self.args.start_in_ms + self.args.tick_ms)
+        self.entrada.iniciar_jogo(self)
 
     def _ciclo(self) -> None:
         p = self.partida
@@ -581,7 +563,8 @@ class Host:
         self._difundir(estado)
         self.ultimo_ciclo_enviado = r.ciclo
         self.ultimo_grid = estado["grid"]
-        if self.args.mostrar:
+        self.ultimo_state = estado
+        if self.args.mostrar and not self.entrada.ativo:
             vivos = ", ".join(p.motos[i].nome for i in p.vivas())
             tela.desenhar(estado["grid"], estado["bikes"],
                           f"[host {self.args.nome}] ciclo {r.ciclo}  vivos: {vivos}")
@@ -614,22 +597,52 @@ class Host:
                 if chave.data is not None and mask & selectors.EVENT_WRITE:
                     self._descarregar(chave.data)
 
+    def _despedir(self, limite: float = 0.2) -> None:
+        abertos = []
+        for conn in self.conexoes:
+            if conn.estado == FECHADA:
+                continue
+            try:
+                conn.sock.shutdown(socket.SHUT_WR)
+                abertos.append(conn.sock)
+            except OSError:
+                pass
+        fim = time.monotonic() + limite
+        while abertos and time.monotonic() < fim:
+            try:
+                prontos, _, _ = select.select(abertos, [], [], max(0.0, fim - time.monotonic()))
+            except (OSError, ValueError):
+                return
+            for s in prontos:
+                try:
+                    dados = s.recv(65536)
+                except (BlockingIOError, InterruptedError):
+                    continue
+                except OSError:
+                    dados = b""
+                if not dados:
+                    abertos.remove(s)
+
     def _encerrar(self) -> None:
         self._esvaziar(0.5)
+        self._despedir()
         for conn in list(self.conexoes):
             self._fechar(conn)
         if self.escuta:
             self.sel.unregister(self.escuta)
             self.escuta.close()
-        self.entrada.fechar()
+        resultado = None
         if self.partida is None:
             self.lobby.cancelar_partida()
         elif self.game_over and not self.abortada:
             w = self.game_over["winner"]
             self.lobby.encerrar_partida(w["name"] if w else None)
-            print(tela.resumo_resultado(self.game_over, self.ultimo_grid), flush=True)
+            resultado = tela.resumo_resultado(self.game_over, self.ultimo_grid)
         else:
             self.lobby.encerrar_partida(None)
+        self.entrada.fechar(self)
+        if resultado:
+            print(resultado, flush=True)
         self.lobby.fechar()
 
 
@@ -661,7 +674,10 @@ def ler_argumentos(argv=None):
     ap.add_argument("--largura", type=int, default=40)
     ap.add_argument("--altura", type=int, default=20)
     ap.add_argument("--entrada", choices=("bot", "nenhuma", "teclado"), default="bot",
-                    help="como a moto do host é controlada")
+                    help="como a moto do host é controlada; teclado = setas ou WASD em tela "
+                         "cheia (Windows, Linux e macOS)")
+    ap.add_argument("--ascii", action="store_true", help="com --entrada teclado: só ASCII na tela")
+    ap.add_argument("--sem-cor", action="store_true", help="com --entrada teclado: tela sem cores")
     ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--mostrar", action="store_true", help="desenha a arena a cada ciclo")
     ap.add_argument("--log", default=None, help="arquivo de log (padrão: stderr)")
@@ -682,11 +698,14 @@ def ler_argumentos(argv=None):
 
 
 def configurar_log(args, nome):
+    handlers = None
+    if args.log:
+        handlers = [logging.FileHandler(args.log, encoding="utf-8")]
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format=f"%(asctime)s.%(msecs)03d [{nome}] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
-        filename=args.log,
+        handlers=handlers,
     )
 
 
@@ -696,10 +715,15 @@ def _sigterm(signum, frame):
 
 def main(argv=None) -> int:
     args = ler_argumentos(argv)
+    if args.entrada == "teclado" and args.log is None:
+        args.log = f"host_{args.nome}.log"
     configurar_log(args, args.nome)
     rng = random.Random(args.seed)
     if args.entrada == "teclado":
-        entrada = EntradaTeclado()
+        from host_tela import EntradaTecladoTela
+        from ui import Opcoes, ascii_automatico
+        entrada = EntradaTecladoTela(Opcoes(ascii=args.ascii or ascii_automatico(sys.stdout),
+                                            cor=not args.sem_cor))
     elif args.entrada == "bot":
         entrada = EntradaBot(rng)
     else:

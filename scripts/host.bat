@@ -7,4 +7,4 @@ if "%NOME%"=="" set NOME=Ana
 set PORTA=%3
 if "%PORTA%"=="" set PORTA=6000
 python rede.py testar %1 5000 --vezes 3 || exit /b 1
-python host.py --nome %NOME% --porta %PORTA% --lobby-ip %1 --mostrar --log host_%NOME%.log -v
+python host.py --nome %NOME% --porta %PORTA% --lobby-ip %1 --largura 56 --altura 24 --tick-ms 150 --entrada teclado --log host_%NOME%.log -v
