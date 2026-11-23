@@ -1,9 +1,3 @@
-"""Teclado, terminal, host e lobby falsos para testar o jogador.py.
-
-O host e o lobby falsos usam sockets de verdade em 127.0.0.1 (o select do
-Windows só aceita sockets), cada um numa thread, e seguem um roteiro combinado.
-"""
-
 from __future__ import annotations
 
 import collections
@@ -16,18 +10,13 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import protocol as P  # noqa: E402
+import protocol as P
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
-PRAZO = 10.0  # s: nenhum falso espera mais que isso (evita teste travado)
+PRAZO = 10.0
 
 
 class TecladoFalso:
-    """Teclas combinadas. Cada passo é uma lista de teclas, entregue numa leitura,
-    ou (predicado, lista), entregue só quando predicado(jogador) for verdadeiro.
-    A tecla "KBI" levanta KeyboardInterrupt (simula o Ctrl+C). Depois de PRAZO
-    segundos sem passos, entrega "q" para o teste nunca travar."""
-
     def __init__(self, passos=(), prazo: float = PRAZO):
         self.passos = list(passos)
         self.prazo = prazo
@@ -79,8 +68,6 @@ class TecladoFalso:
 
 
 class TerminalFalso:
-    """Guarda os quadros em vez de desenhar."""
-
     def __init__(self, tamanho=(100, 30)):
         self.tam = tamanho
         self.quadros: list[list[str]] = []
@@ -110,8 +97,6 @@ class TerminalFalso:
 
 
 class _Conexao:
-    """Lado servidor de uma conexão: envio com lock e mensagens recebidas."""
-
     def __init__(self, sock):
         self.sock = sock
         self.leitor = P.LeitorLinhas()
@@ -129,18 +114,6 @@ class _Conexao:
 
 
 class HostFalso(threading.Thread):
-    """Aceita um jogador e segue o roteiro. Ações:
-        ("espera", "HELLO")       espera chegar a mensagem desse tipo
-        ("espera", "TURN", n)     espera ter recebido n TURN no total
-        ("manda", msg)            envia a mensagem
-        ("bytes", b"...")         envia bytes crus
-        ("pausa", s)              espera s segundos (continua respondendo PING)
-        ("silencio", s)           não manda nada nem responde PING por s segundos
-        ("chama", funcao)         chama funcao() (ex.: derrubar o lobby falso)
-        ("fecha",)                fecha a conexão
-    Enquanto não está em silêncio, manda PING a cada `ping_a_cada` s e responde PING.
-    """
-
     def __init__(self, roteiro, ping_a_cada: float = 0.1):
         super().__init__(daemon=True)
         self.roteiro = list(roteiro)
@@ -156,7 +129,6 @@ class HostFalso(threading.Thread):
         self.conn: _Conexao | None = None
         self.start()
 
-    # ------------------------------------------------------------------ consulta
     def tipos(self) -> list[str]:
         with self._trava:
             return [m["type"] for m in self.recebidas]
@@ -168,7 +140,6 @@ class HostFalso(threading.Thread):
     def esperar_fim(self, limite: float = PRAZO) -> None:
         self.join(limite)
 
-    # ------------------------------------------------------------------ thread
     def run(self):
         self.escuta.settimeout(PRAZO)
         try:
@@ -184,7 +155,7 @@ class HostFalso(threading.Thread):
             if self._fechado.is_set():
                 break
             self._executar(acao)
-        self._fechado.wait(PRAZO)  # espera o jogador fechar
+        self._fechado.wait(PRAZO)
         try:
             sock.close()
         except OSError:
@@ -242,13 +213,6 @@ class HostFalso(threading.Thread):
 
 
 class LobbyFalso(threading.Thread):
-    """Lobby mínimo: REGISTER, LIST_MATCHES, JOIN_MATCH e PING.
-
-    `salas` é a lista devolvida no MATCH_LIST; `host_porta` vai no JOIN_OK;
-    `erro_join` (ex.: "MATCH_FULL") faz o JOIN_MATCH responder ERROR;
-    nomes em `ocupados` recebem NAME_TAKEN. `cair()` fecha tudo.
-    """
-
     def __init__(self, salas, host_porta: int = 1, erro_join: str | None = None, ocupados=()):
         super().__init__(daemon=True)
         self.salas = salas

@@ -1,16 +1,3 @@
-"""Desenho do jogador no terminal por escapes ANSI (apêndice D.5, decisão D13).
-
-Duas partes:
-  - funções puras `montar_menu`, `montar_sala`, `montar_jogo` e `montar_fim`:
-    recebem dados e devolvem a lista de linhas (com ANSI) de uma tela, sem
-    escrever em lugar nenhum. São elas que os testes conferem;
-  - a classe `Terminal`: modo tela cheia (buffer alternativo, cursor escondido)
-    e `mostrar(linhas)`, que reescreve só as linhas que mudaram, para não piscar.
-
-Só biblioteca padrão; `ctypes` só é usado (e importado) no Windows, dentro de
-`ativar_ansi_windows()`.
-"""
-
 from __future__ import annotations
 
 import atexit
@@ -21,27 +8,17 @@ import sys
 import unicodedata
 from dataclasses import dataclass
 
-# ---------------------------------------------------------------------------
-# Opções e dados de tela
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Opcoes:
-    """Opções de desenho vindas da linha de comando."""
-    ascii: bool = False          # --ascii (ou automático, se o stdout não for UTF-8)
-    cor: bool = True             # False com --sem-cor
-    celula: int | None = None    # --celula 1|2; None = automático a cada quadro
+    ascii: bool = False
+    cor: bool = True
+    celula: int | None = None
 
 
 @dataclass(frozen=True)
 class InfoSala:
-    """Dados da sala de espera que não vêm todos no WELCOME.
-
-    `nome` vem da linha do MATCH_LIST escolhida no menu (o JOIN_OK não traz o
-    nome da sala); com --host ele é None. `match_id`, `min_jogadores` e
-    `max_jogadores` são atualizados quando o WELCOME chega.
-    """
     match_id: int | None
     nome: str | None
     host_ip: str
@@ -50,9 +27,6 @@ class InfoSala:
     max_jogadores: int = 4
 
 
-# ---------------------------------------------------------------------------
-# Caracteres e cores
-# ---------------------------------------------------------------------------
 GLIFOS_UNICODE = {
     "rastro": "█", "morto": "✖", "marcador": "●",
     "UP": "▲", "DOWN": "▼", "LEFT": "◀", "RIGHT": "▶",
@@ -66,11 +40,11 @@ GLIFOS_ASCII = {
     "setas": "setas", "cima_baixo": "W/S",
 }
 
-CORES = {0: "31", 1: "32", 2: "33", 3: "36"}  # iguais às do tela.py
+CORES = {0: "31", 1: "32", 2: "33", 3: "36"}
 RESET = "\x1b[0m"
 NEGRITO = "1"
 APAGADO = "2"
-FAIXA_AVISO = "41;97"  # fundo vermelho, letra branca
+FAIXA_AVISO = "41;97"
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
@@ -90,16 +64,11 @@ def _cor_id(pid: int, negrito: bool = False) -> str:
     return f"{NEGRITO};{base}" if negrito else base
 
 
-# ---------------------------------------------------------------------------
-# Ajudantes puros
-# ---------------------------------------------------------------------------
 def largura_visivel(s: str) -> int:
-    """Número de colunas que a linha ocupa na tela (sem contar os escapes ANSI)."""
     return len(_ANSI_RE.sub("", s))
 
 
 def cortar_visivel(s: str, n: int) -> str:
-    """Corta a linha em `n` colunas visíveis sem quebrar nenhum escape ANSI."""
     if largura_visivel(s) <= n:
         return s
     saida = []
@@ -122,12 +91,10 @@ def cortar_visivel(s: str, n: int) -> str:
 
 
 def _completar(s: str, n: int) -> str:
-    """Completa com espaços até `n` colunas visíveis."""
     return s + " " * max(0, n - largura_visivel(s))
 
 
 def _so_ascii(s: str) -> str:
-    """Tira acentos (é -> e) e troca o que sobrar fora do ASCII por '?'."""
     saida = []
     for ch in unicodedata.normalize("NFKD", s):
         if ord(ch) < 128:
@@ -144,14 +111,12 @@ def _finalizar(linhas: list[str], opcoes: Opcoes) -> list[str]:
 
 
 def escolher_celula(opcoes: Opcoes, largura_arena: int, colunas: int) -> int:
-    """Largura de cada célula: a forçada por --celula, ou 2 se couber com folga."""
     if opcoes.celula in (1, 2):
         return opcoes.celula
     return 2 if colunas >= 2 * largura_arena + 4 else 1
 
 
 def state_inicial(game_start: dict) -> dict:
-    """STATE do ciclo 0 montado a partir do GAME_START (usado na CONTAGEM)."""
     largura = game_start["arena"]["width"]
     altura = game_start["arena"]["height"]
     linhas = [["."] * largura for _ in range(altura)]
@@ -165,7 +130,6 @@ def state_inicial(game_start: dict) -> dict:
 
 
 def ascii_automatico(stream) -> bool:
-    """True se `stream` não usa UTF-8 (chamar antes de qualquer reconfigure)."""
     enc = (getattr(stream, "encoding", None) or "").lower().replace("-", "").replace("_", "")
     return enc not in ("utf8", "utf8sig")
 
@@ -183,15 +147,11 @@ def _cabecalho(esquerda: str, direita: str, largura: int) -> str:
     return esquerda + " " * espaco + direita
 
 
-# ---------------------------------------------------------------------------
-# Telas
-# ---------------------------------------------------------------------------
-LARGURA_TEXTO = 72  # largura de referência das telas de texto (menu, sala, fim)
+LARGURA_TEXTO = 72
 
 
 def montar_menu(salas: list[dict], selecionada: int, nome: str, lobby_txt: str,
                 aviso: str | None, opcoes: Opcoes) -> list[str]:
-    """Menu de salas (estado NO_LOBBY): tabela do MATCH_LIST."""
     g = glifos(opcoes)
     linhas = [_cabecalho(f" TRON em rede           você: {nome}", f"lobby: {lobby_txt}",
                          LARGURA_TEXTO),
@@ -221,7 +181,6 @@ def montar_menu(salas: list[dict], selecionada: int, nome: str, lobby_txt: str,
 
 def montar_sala(sala: InfoSala, jogadores: list[dict], meu_id: int,
                 lobby_ok: bool | None, opcoes: Opcoes) -> list[str]:
-    """Sala de espera (estado AGUARDANDO_INICIO): lista do ROSTER."""
     g = glifos(opcoes)
     nomes = {j["id"]: j["name"] for j in jogadores}
     titulo = f" Sala '{sala.nome}'" if sala.nome else " Sala"
@@ -250,12 +209,6 @@ def montar_sala(sala: InfoSala, jogadores: list[dict], meu_id: int,
 def montar_jogo(estado: str, ultimo_state: dict, arena: tuple[int, int], jogadores: dict[int, str],
                 meu_id: int, eliminado_por: tuple[str, int] | None, contagem: int | None,
                 lobby_ok: bool | None, tamanho: tuple[int, int], opcoes: Opcoes) -> list[str]:
-    """Tela da partida (CONTAGEM, JOGANDO, ESPECTADOR): altura da arena + 4 linhas.
-
-    `ultimo_state` é o último STATE recebido (na contagem, o de state_inicial);
-    `tamanho` = (colunas, linhas) do terminal; `contagem` = número a mostrar no
-    meio da arena (só na CONTAGEM); `eliminado_por` = (motivo, ciclo).
-    """
     g = glifos(opcoes)
     largura, altura = arena
     colunas, n_linhas = tamanho
@@ -272,7 +225,6 @@ def montar_jogo(estado: str, ultimo_state: dict, arena: tuple[int, int], jogador
                            f" Aumente o terminal: precisa de {larg_moldura}x{altura + 4}, "
                            f"tem {colunas}x{n_linhas}"], opcoes)
 
-    # cada linha da arena vira uma lista de (código de cor, caractere), uma por coluna visível
     motos = {(b["x"], b["y"]): b for b in ultimo_state.get("bikes", [])}
     grid = ultimo_state.get("grid", [])
     celulas: list[list[tuple]] = []
@@ -327,7 +279,6 @@ def montar_jogo(estado: str, ultimo_state: dict, arena: tuple[int, int], jogador
 
 
 def _render(celulas: list[tuple], opcoes: Opcoes) -> str:
-    """Junta as colunas de uma linha, abrindo um escape de cor só quando a cor muda."""
     if not opcoes.cor:
         return "".join(ch for _, ch in celulas)
     partes = []
@@ -347,7 +298,6 @@ def _render(celulas: list[tuple], opcoes: Opcoes) -> str:
 
 def montar_fim(game_over_ou_motivo: dict | str, jogadores: dict[int, str],
                lobby_ok: bool | None, opcoes: Opcoes) -> list[str]:
-    """Tela de FIM: o GAME_OVER recebido, ou o motivo (str) da partida abortada."""
     linhas = [" FIM DE PARTIDA"]
     if isinstance(game_over_ou_motivo, dict):
         go = game_over_ou_motivo
@@ -376,36 +326,27 @@ def montar_fim(game_over_ou_motivo: dict | str, jogadores: dict[int, str],
     return _finalizar(linhas, opcoes)
 
 
-# ---------------------------------------------------------------------------
-# Terminal
-# ---------------------------------------------------------------------------
 class ErroTerminal(Exception):
-    """O terminal não aceita ANSI (o programa sai com código 2)."""
+    pass
 
 
-ENTRAR = "\x1b[?1049h\x1b[?25l"            # buffer alternativo, cursor escondido
-SAIR = RESET + "\x1b[?25h\x1b[?1049l"      # cores zeradas, cursor visível, buffer normal
+ENTRAR = "\x1b[?1049h\x1b[?25l"
+SAIR = RESET + "\x1b[?25h\x1b[?1049l"
 
-_MODO_VT = 0x0004  # ENABLE_VIRTUAL_TERMINAL_PROCESSING
+_MODO_VT = 0x0004
 
 
 def ativar_ansi_windows() -> bool:
-    """Liga o processamento de escapes ANSI no console do Windows.
-
-    Fora do Windows não faz nada e devolve True. No Windows tenta
-    SetConsoleMode com ENABLE_VIRTUAL_TERMINAL_PROCESSING; se falhar, tenta
-    os.system("") (truque que liga o modo VT em alguns consoles) e confere de novo.
-    """
     if sys.platform != "win32":
         return True
     try:
         import ctypes
         from ctypes import wintypes
         kernel32 = ctypes.windll.kernel32
-        h = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        h = kernel32.GetStdHandle(-11)
         modo = wintypes.DWORD()
         if not kernel32.GetConsoleMode(h, ctypes.byref(modo)):
-            return False  # stdout não é um console
+            return False
         if modo.value & _MODO_VT:
             return True
         if kernel32.SetConsoleMode(h, modo.value | _MODO_VT):
@@ -419,15 +360,6 @@ def ativar_ansi_windows() -> bool:
 
 
 class Terminal:
-    """Modo tela cheia e desenho sem piscar.
-
-    Uso:
-        with Terminal() as t:
-            t.mostrar(montar_menu(...))
-
-    `saida`, `tamanho` e `ativar_ansi` podem ser trocados nos testes.
-    """
-
     def __init__(self, saida=None, tamanho=None, ativar_ansi=ativar_ansi_windows) -> None:
         self.saida = saida if saida is not None else sys.stdout
         self._tamanho = tamanho if tamanho is not None else self._tamanho_real
@@ -460,7 +392,6 @@ class Terminal:
         self._restaurar()
 
     def _restaurar(self) -> None:
-        """Volta o terminal ao normal. Pode ser chamada mais de uma vez."""
         if not self.ativo:
             return
         self.ativo = False
@@ -474,22 +405,13 @@ class Terminal:
         self.saida.flush()
 
     def tamanho(self) -> tuple[int, int]:
-        """(colunas, linhas) do terminal."""
         c, l = self._tamanho()
         return (int(c), int(l))
 
     def nova_tela(self) -> None:
-        """O próximo mostrar() redesenha tudo (usado ao trocar de tela)."""
         self._anteriores = None
 
     def mostrar(self, linhas: list[str]) -> None:
-        """Escreve só as linhas que mudaram desde o último quadro, numa só escrita.
-
-        Redesenha tudo no primeiro quadro, quando o tamanho muda e depois de
-        nova_tela(). Nunca escreve "\\n" (rolaria a tela) e corta cada linha na
-        largura do terminal; a última linha do terminal é cortada uma coluna
-        antes, para o cursor não passar da borda e rolar a tela em alguns consoles.
-        """
         colunas, n_linhas = self.tamanho()
         tam = (colunas, n_linhas)
         completo = self._anteriores is None or tam != self._tamanho_anterior
@@ -503,7 +425,7 @@ class Terminal:
             if completo or i >= len(anteriores) or anteriores[i] != linha:
                 partes.append(f"\x1b[{i + 1};1H{linha}{RESET}\x1b[K")
         for i in range(len(novas), min(len(anteriores), n_linhas)):
-            partes.append(f"\x1b[{i + 1};1H\x1b[K")  # sobras do quadro anterior
+            partes.append(f"\x1b[{i + 1};1H\x1b[K")
         self._anteriores = novas
         self._tamanho_anterior = tam
         if partes:

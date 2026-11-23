@@ -1,5 +1,3 @@
-"""Testes de ui.py: telas montadas (funções puras) e Terminal com saída falsa."""
-
 import os
 import re
 import sys
@@ -7,8 +5,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import ui  # noqa: E402
-from ui import (InfoSala, Opcoes, Terminal, cortar_visivel, escolher_celula,  # noqa: E402
+import ui
+from ui import (InfoSala, Opcoes, Terminal, cortar_visivel, escolher_celula,
                 largura_visivel, montar_fim, montar_jogo, montar_menu, montar_sala,
                 state_inicial)
 
@@ -23,7 +21,6 @@ JOGADORES = {0: "Ana", 1: "Beto", 2: "Caio"}
 
 
 def state_exemplo():
-    """Ana andou para a direita, Beto subiu, Caio morreu."""
     grid = [["."] * 40 for _ in range(20)]
     for x in range(4, 9):
         grid[4][x] = "0"
@@ -120,7 +117,7 @@ class TestMontarJogo(unittest.TestCase):
     def test_cabeca_do_jogador_local_em_negrito(self):
         linhas = jogo(tamanho=(80, 24))
         self.assertIn("\x1b[1;32m▲", linhas[2 + 12])
-        self.assertIn("\x1b[31m", linhas[2 + 4])  # Ana sem negrito
+        self.assertIn("\x1b[31m", linhas[2 + 4])
 
     def test_ascii(self):
         op = Opcoes(ascii=True)
@@ -158,7 +155,7 @@ class TestMontarJogo(unittest.TestCase):
         linhas = sem_ansi(jogo(tamanho=(30, 10)))
         self.assertIn("Aumente o terminal: precisa de 42x24, tem 30x10", "\n".join(linhas))
         self.assertLess(len(linhas), 24)
-        linhas = sem_ansi(jogo(tamanho=(80, 23)))  # uma linha a menos
+        linhas = sem_ansi(jogo(tamanho=(80, 23)))
         self.assertIn("precisa de 42x24, tem 80x23", "\n".join(linhas))
 
     def test_contagem(self):
@@ -199,7 +196,7 @@ class TestTelasDeTexto(unittest.TestCase):
         self.assertIn("2/4", linha_ana)
         linha_x = next(i for i, l in enumerate(texto) if "INICIADA" in l)
         self.assertTrue(texto[linha_x].startswith("   4"))
-        self.assertIn("\x1b[2m", linhas[linha_x])  # apagada
+        self.assertIn("\x1b[2m", linhas[linha_x])
 
         texto = sem_ansi(montar_menu(SALAS, 1, "Beto", "x", None, Opcoes()))
         self.assertTrue(next(l for l in texto if "INICIADA" in l).startswith(" > 4"))
@@ -282,7 +279,7 @@ class TestTerminal(unittest.TestCase):
                 raise KeyboardInterrupt
         self.assertIn("\x1b[?1049l", self.saida.escritas[-1])
         n = len(self.saida.escritas)
-        self.t._restaurar()  # segunda vez não escreve nada
+        self.t._restaurar()
         self.assertEqual(len(self.saida.escritas), n)
 
     def test_sem_ansi(self):
@@ -295,7 +292,7 @@ class TestTerminal(unittest.TestCase):
         with self.t:
             self.saida.escritas.clear()
             self.t.mostrar(["a", "b", "c"])
-            self.assertEqual(len(self.saida.escritas), 1)  # uma escrita por quadro
+            self.assertEqual(len(self.saida.escritas), 1)
             primeiro = self.saida.escritas[0]
             for n in (1, 2, 3):
                 self.assertIn(f"\x1b[{n};1H", primeiro)
@@ -308,10 +305,10 @@ class TestTerminal(unittest.TestCase):
             self.assertNotIn("\x1b[3;1H", segundo)
             self.assertNotIn("\x1b[2J", segundo)
 
-            self.t.mostrar(["a", "B", "c"])  # nada mudou: nada escrito
+            self.t.mostrar(["a", "B", "c"])
             self.assertEqual(len(self.saida.escritas), 2)
 
-            self.t.mostrar(["a"])  # quadro mais curto limpa as sobras
+            self.t.mostrar(["a"])
             terceiro = self.saida.escritas[2]
             self.assertIn("\x1b[2;1H\x1b[K", terceiro)
             self.assertIn("\x1b[3;1H\x1b[K", terceiro)
@@ -335,7 +332,7 @@ class TestTerminal(unittest.TestCase):
             self.assertNotIn("\n", s)
             self.assertIn("x" * 10 + "\x1b[0m", s)
             self.assertNotIn("x" * 11, s)
-            self.assertIn("z" * 9 + "\x1b[0m", s)  # última linha: uma coluna a menos
+            self.assertIn("z" * 9 + "\x1b[0m", s)
             self.assertNotIn("z" * 10, s)
             self.assertNotIn("nao cabe", s)
 

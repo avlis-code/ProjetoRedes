@@ -1,21 +1,4 @@
 #!/usr/bin/env python3
-"""Jogador do Tron com teclado e tela (seção 6 e apêndice D do protocolo v0.3).
-
-    python3 jogador.py --nome Beto --lobby-ip 192.168.0.5 [--lobby-porta 5000]
-    python3 jogador.py --nome Beto --host 192.168.0.10 --porta 6000     # sem lobby
-
-Estrutura (decisão D15): um laço único na thread principal (socket do host,
-teclado e tela) e uma thread só para o PING ao lobby durante a partida. As duas
-compartilham apenas a flag `ThreadLobby.vivo` e um `threading.Event`.
-
-Nada é impresso no terminal enquanto ele está em tela cheia: o log vai para
-arquivo e as linhas finais (RESULTADO ... / ABORTADA ...) são impressas depois
-que o terminal é restaurado.
-
-Códigos de saída: 0 partida completa; 1 abortada, recusada ou o usuário saiu;
-2 terminal sem suporte (sem TTY, sem ANSI).
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -51,27 +34,16 @@ HOST_PERDIDO = "Conexão com o host perdida"
 
 @dataclass
 class Tempos:
-    """Tempos do cliente (apêndice B). Os testes passam valores pequenos."""
-    hello: float = P.TIMEOUT_HELLO       # prazo do WELCOME
-    vida: float = P.TIMEOUT_VIDA         # sem receber nada -> host perdido
-    ping: float = P.PING_INTERVALO       # sem enviar nada -> PING ao host
-    passo: float = 0.03                  # espera máxima no socket do host por volta do laço
-    lista_salas: float = 3.0             # atualização do menu
-    ping_lobby: float = PING_LOBBY       # sem falar com o lobby -> PING
-    aviso: float = 1.5                   # quanto tempo fica a mensagem "lobby indisponível"
+    hello: float = P.TIMEOUT_HELLO
+    vida: float = P.TIMEOUT_VIDA
+    ping: float = P.PING_INTERVALO
+    passo: float = 0.03
+    lista_salas: float = 3.0
+    ping_lobby: float = PING_LOBBY
+    aviso: float = 1.5
 
 
-# ---------------------------------------------------------------------------
-# Thread do lobby (seção 6.4)
-# ---------------------------------------------------------------------------
 class ThreadLobby:
-    """Dona exclusiva da ConexaoLobby entre o JOIN_OK e o FIM.
-
-    Manda PING depois de `intervalo` segundos sem falar com o lobby. Se o lobby
-    cair, registra uma linha no log, fecha a conexão e marca `vivo = False`.
-    Não toca na tela nem no socket do host, e não segura nenhum lock do jogo.
-    """
-
     def __init__(self, conexao: ConexaoLobby, intervalo: float) -> None:
         self.conexao = conexao
         self.intervalo = intervalo
@@ -87,7 +59,6 @@ class ThreadLobby:
         self._thread.start()
 
     def parar(self, timeout: float = P.TIMEOUT_LOBBY) -> None:
-        """Para a thread e espera ela terminar (no máximo `timeout`, se estiver num PING)."""
         self._parar.set()
         if self._thread is not None:
             self._thread.join(timeout)
@@ -103,7 +74,7 @@ class ThreadLobby:
             try:
                 self.conexao.ping()
             except ErroLobby as e:
-                if e.codigo is not None:  # o lobby respondeu ERROR: ele está vivo
+                if e.codigo is not None:
                     log.warning("lobby respondeu ERROR ao PING: %s", e)
                     continue
                 log.warning("conexão com o lobby perdida (%s); a partida não é afetada", e)
@@ -112,16 +83,7 @@ class ThreadLobby:
                 return
 
 
-# ---------------------------------------------------------------------------
-# Jogador
-# ---------------------------------------------------------------------------
 class Jogador:
-    """Máquina de estados do jogador comum (seção 6).
-
-    `teclado` e `terminal` são injetados (nos testes, falsos). `perguntar` e
-    `dizer` só são usados antes da tela cheia (nome, IP do lobby, erros do lobby).
-    """
-
     def __init__(self, args, teclado, terminal, relogio=time.monotonic,
                  tempos: Tempos | None = None, perguntar=input, dizer=print) -> None:
         self.args = args
@@ -139,7 +101,6 @@ class Jogador:
         self.saida = 1
         self.linhas_saida: list[str] = []
 
-        # lobby e menu
         self.lobby: ConexaoLobby | None = None
         self.thread_lobby: ThreadLobby | None = None
         self.salas: list[dict] = []
@@ -150,7 +111,6 @@ class Jogador:
 
         self._nova_partida(InfoSala(None, None, args.host or "", args.porta))
 
-    # ================================================================== execução
     def executar(self) -> int:
         try:
             if not self._preparar():
@@ -171,7 +131,6 @@ class Jogador:
         return self.saida
 
     def _preparar(self) -> bool:
-        """Antes da tela cheia: pergunta o que faltar e, com lobby, faz o REGISTER."""
         a = self.args
         while not P.nome_valido(self.nome):
             if self.nome:
@@ -184,7 +143,6 @@ class Jogador:
         return self._entrar_no_lobby()
 
     def _entrar_no_lobby(self) -> bool:
-        """CONECTANDO_LOBBY -> NO_LOBBY. NAME_TAKEN/BAD_NAME: pede outro nome."""
         a = self.args
         self.estado = "CONECTANDO_LOBBY"
         self.dizer(f"Conectando ao lobby {a.lobby_ip}:{a.lobby_porta}...")
@@ -216,7 +174,6 @@ class Jogador:
                     self.nome = self.perguntar("Outro nome: ").strip()
 
     def _sessao(self) -> None:
-        """Já em tela cheia: menu -> partida -> fim -> menu..., ou uma partida só sem lobby."""
         if self.sem_lobby:
             info = InfoSala(None, None, self.args.host, self.args.porta)
             if self._jogar(info) == "FIM":
@@ -229,7 +186,7 @@ class Jogador:
             if escolha is None:
                 return
             resultado = self._jogar(escolha)
-            if resultado == "MENU":  # caiu antes do GAME_START: volta ao menu com o motivo
+            if resultado == "MENU":
                 self.aviso = self.resultado if isinstance(self.resultado, str) else None
                 if not self._retomar_lobby():
                     self._mostrar_lobby_indisponivel()
@@ -241,9 +198,7 @@ class Jogador:
                 self._mostrar_lobby_indisponivel()
                 return
 
-    # ================================================================== menu
     def _menu(self) -> InfoSala | None:
-        """NO_LOBBY: lista de salas. Devolve a sala escolhida (já com JOIN_OK) ou None."""
         self.estado = "NO_LOBBY"
         self.vezes_menu += 1
         self.terminal.nova_tela()
@@ -299,7 +254,6 @@ class Jogador:
                     proxima_lista = 0.0
 
     def _atualizar_salas(self) -> bool:
-        """LIST_MATCHES. False se o lobby caiu."""
         selecionada_id = (self.salas[self.selecionada]["match_id"]
                           if 0 <= self.selecionada < len(self.salas) else None)
         try:
@@ -329,7 +283,6 @@ class Jogador:
         return None
 
     def _join(self, sala: dict) -> InfoSala | None:
-        """JOIN_MATCH. Devolve a InfoSala com o endereço do host, ou None (aviso já posto)."""
         try:
             ok = self.lobby.pedir({"type": "JOIN_MATCH", "match_id": sala["match_id"]}, "JOIN_OK")
         except ErroLobby as e:
@@ -346,7 +299,6 @@ class Jogador:
                         max_jogadores=sala["max_players"])
 
     def _entrar_direto(self, match_id: int) -> InfoSala | None:
-        """--partida ID: entra sem passar pelo menu (a sala precisa estar ABERTA)."""
         if not self._atualizar_salas():
             return None
         sala = next((s for s in self.salas if s["match_id"] == match_id), None)
@@ -361,10 +313,6 @@ class Jogador:
         return escolha
 
     def _retomar_lobby(self) -> bool:
-        """Depois da partida: para a thread do PING e confirma que o lobby segue vivo.
-
-        Não manda novo REGISTER: a conexão continua registrada (seção 6.4).
-        """
         if self.sem_lobby or self.lobby is None:
             return False
         if self.thread_lobby is not None:
@@ -398,7 +346,6 @@ class Jogador:
             return self.thread_lobby.vivo
         return self.lobby is not None
 
-    # ================================================================== partida
     def _nova_partida(self, info: InfoSala) -> None:
         self.info = info
         self.sock: socket.socket | None = None
@@ -425,10 +372,9 @@ class Jogador:
         self._lobby_mostrado = None
 
     def _jogar(self, info: InfoSala) -> str:
-        """CONECTANDO_HOST até FIM. Devolve "MENU" (acabou antes do GAME_START) ou "FIM"."""
         self._nova_partida(info)
         self.estado = "CONECTANDO_HOST"
-        if not self.sem_lobby:  # a thread do lobby assume a conexão a partir do JOIN_OK
+        if not self.sem_lobby:
             self.thread_lobby = ThreadLobby(self.lobby, self.tempos.ping_lobby)
             self.thread_lobby.iniciar()
         self._desenhar()
@@ -459,20 +405,13 @@ class Jogador:
                 self._manutencao()
                 self._desenhar()
         except KeyboardInterrupt:
-            self._sair_ctrl_c()  # BYE antes de fechar o socket
+            self._sair_ctrl_c()
             raise
         finally:
             self._fechar_socket()
         return "FIM" if self.foi_ao_jogo else "MENU"
 
     def _fechar_socket(self) -> None:
-        """Fecha o socket do host.
-
-        Depois de um BYE, fecha a escrita primeiro e lê o que ainda estiver
-        chegando por até 0,2 s. Sem isso, fechar com dados não lidos (ex.: PING
-        do host) faz o sistema mandar RST no lugar de FIN, e o host pode perder
-        o BYE (no Windows isso acontece com frequência).
-        """
         if self.sock is None:
             return
         if self._bye_enviado:
@@ -544,7 +483,6 @@ class Jogador:
             self._enviar(P.ping(int(time.monotonic() * 1000)))
 
     def _abortar(self, motivo: str) -> None:
-        """Fim sem resultado. Antes do GAME_START volta ao menu; depois, tela de FIM."""
         if self.estado == "FIM":
             return
         log.warning("partida abortada: %s", motivo)
@@ -553,10 +491,7 @@ class Jogador:
         self.saida = 1
         self.estado = "FIM"
 
-    # ------------------------------------------------------------------ mensagens
     def processar(self, linha: bytes) -> None:
-        """Seção 6.1: mensagem inesperada ou inválida vai para o log e é ignorada.
-        O jogador nunca responde ERROR ao host."""
         try:
             msg = P.decodificar(linha)
         except P.ErroProtocolo as e:
@@ -643,7 +578,6 @@ class Jogador:
         self.estado = "FIM"
         log.info("GAME_OVER: %s", msg)
 
-    # ------------------------------------------------------------------ teclado
     def _tratar_tecla(self, tecla: str) -> None:
         if tecla == "CTRL_C":
             raise KeyboardInterrupt
@@ -670,8 +604,6 @@ class Jogador:
         self.ultima_dir_no_ciclo = None
 
     def _enviar_turn(self, direcao: str) -> None:
-        """Seção 6.3: no máximo 2 TURN por ciclo, sem repetir a última direção do
-        ciclo. Inversões NÃO são filtradas (decisão D14): quem decide é o host."""
         if self.turns_no_ciclo >= MAX_TURN_POR_CICLO or direcao == self.ultima_dir_no_ciclo:
             return
         self._enviar(P.turn(direcao, self.ultimo_ciclo))
@@ -680,7 +612,6 @@ class Jogador:
         log.debug("TURN %s (ciclo %d)", direcao, self.ultimo_ciclo)
 
     def _sair_ctrl_c(self) -> None:
-        """Ctrl+C: BYE ao host se ainda conectado, e fecha o socket (uma vez só)."""
         if self._ctrl_c_tratado:
             return
         self._ctrl_c_tratado = True
@@ -695,13 +626,11 @@ class Jogador:
             self.linhas_saida.append("ABORTADA Ctrl+C")
         log.info("saindo por Ctrl+C")
 
-    # ------------------------------------------------------------------ tela
     def _contagem(self) -> int:
         restante = self.start_in_ms / 1000 - (self.relogio() - self.inicio_contagem)
         return max(0, math.ceil(restante))
 
     def _desenhar(self) -> None:
-        """Redesenha se mudou algo: mensagem, número da contagem, tamanho ou lobby."""
         tela_atual = "jogo" if self.estado in ESTADOS_PARTIDA else self.estado
         if tela_atual != self._tela_atual:
             self.terminal.nova_tela()
@@ -731,10 +660,6 @@ class Jogador:
         self.terminal.mostrar(linhas)
 
     def _tela_fim(self) -> str:
-        """FIM: para a thread do lobby, mostra o resultado e espera Enter ou Q.
-
-        Devolve "MENU" (Enter com o lobby vivo) ou "SAIR".
-        """
         self.estado = "FIM"
         if self.thread_lobby is not None:
             self.thread_lobby.parar()
@@ -760,9 +685,6 @@ class Jogador:
                 return "SAIR"
 
 
-# ---------------------------------------------------------------------------
-# Linha de comando
-# ---------------------------------------------------------------------------
 def ler_argumentos(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="Jogador do Tron em rede (teclado e tela)")
     ap.add_argument("--nome", default=None, help="nome do jogador (se faltar, é perguntado)")
@@ -786,7 +708,6 @@ def ler_argumentos(argv=None) -> argparse.Namespace:
 
 
 def configurar_log(args) -> None:
-    """Log só em arquivo: nada pode aparecer no terminal em tela cheia."""
     raiz = logging.getLogger()
     for h in list(raiz.handlers):
         raiz.removeHandler(h)

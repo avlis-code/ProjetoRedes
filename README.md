@@ -11,6 +11,7 @@ Python 3.8+ só com a biblioteca padrão. Segue `protocolo/protocolo.md` (rascun
 | `host.py` | Host autoritativo: aceita jogadores (`HELLO`/`WELCOME`/`REJECT`/`ROSTER`), `GAME_START`, ciclos a cada `tick_ms`, difunde `STATE`, detecta quedas (heartbeat de 1 s, timeout de 3 s), `GAME_OVER`, `GAME_ABORTED` no Ctrl+C. |
 | `lobby.py` | Servidor de lobby (seções 3.1 e 4). Adaptado do lobby do colega para seguir o protocolo. |
 | `lobby_link.py` | Lado cliente do lobby: `ConexaoLobby` (pedido → resposta), `LobbyCliente` (usado pelo host, numa thread própria) e `LobbyStub` (para rodar sem lobby). |
+| `host_tela.py` | Moto do host pelo teclado (`--entrada teclado`), no Windows e no Linux, com a mesma tela cheia do jogador. |
 | `jogador.py` | Jogador com teclado e tela (parte 3, seção 6 e apêndice D do protocolo v0.3): menu de salas do lobby, sala de espera, jogo com setas/WASD, tela de fim e volta ao menu. Thread própria só para o `PING` ao lobby. |
 | `entrada.py` | Teclado sem biblioteca externa: `msvcrt` no Windows, `termios` no Linux/macOS. Decodifica setas, WASD, Enter, Esc. |
 | `ui.py` | Telas por escapes ANSI (sem `curses`): `Terminal` em tela cheia que reescreve só as linhas que mudaram, e as telas de menu, sala, jogo e fim. Modos `--ascii` e `--sem-cor`. |
@@ -20,7 +21,7 @@ Python 3.8+ só com a biblioteca padrão. Segue `protocolo/protocolo.md` (rascun
 | `rede.py` | Diagnóstico para várias máquinas: IPs locais, porta de teste e `PING`/`PONG` com explicação do erro (firewall, porta fechada, WSL). |
 | `scripts/` | `lobby`, `host` e `jogador` em `.sh` e `.bat`, e `liberar_firewall_windows.bat`. |
 | `relatorio/` | Relatório; cada parte escreve a sua seção. |
-| `testes/` | `test_tron.py`, `test_protocol.py`, `test_entrada.py` e `test_ui.py` (sem rede); `test_jogador.py` (jogador com teclado, terminal, host e lobby falsos, em `falsos.py`); `test_integracao.py`, `test_lobby.py`, `test_jogador_integracao.py` e `test_falhas.py` (processos reais em localhost). |
+| `testes/` | `test_tron.py`, `test_protocol.py`, `test_entrada.py` e `test_ui.py` (sem rede); `test_jogador.py` e `test_host_tela.py` (jogador e moto do host com teclado, terminal, host e lobby falsos, em `falsos.py`); `test_integracao.py`, `test_lobby.py`, `test_jogador_integracao.py` e `test_falhas.py` (processos reais em localhost). |
 
 ## Rodar com o lobby (fluxo completo)
 
@@ -78,7 +79,11 @@ Aqui o cliente conecta direto em `--host`/`--porta`. O host começa sozinho quan
 
 No fim, host e jogadores imprimem uma linha `RESULTADO ...` com vencedor, eliminações e um hash da arena final. Se as linhas forem iguais, todos chegaram ao mesmo resultado (bom para o relatório).
 
-Outras opções do host: `--tick-ms 100`, `--start-in-ms 3000`, `--largura 40 --altura 20`, `--max-jogadores 3|4`, `--entrada bot|nenhuma|teclado` (moto do host; `teclado` = W A S D, só Linux/macOS), `--seed`, `--log arquivo`, `-v`.
+Outras opções do host: `--tick-ms 100`, `--start-in-ms 3000`, `--largura 40 --altura 20`, `--max-jogadores 3|4`, `--entrada bot|nenhuma|teclado`, `--seed`, `--log arquivo`, `-v`.
+
+**Jogar no host:** com `--entrada teclado` (Windows, Linux e macOS) a moto do host vai pelas setas ou WASD, e no `GAME_START` o terminal do host vira a mesma tela do jogador (contagem, arena, legenda, `lobby: ok/fora`). Q ou Ctrl+C encerram a partida para todos (`GAME_ABORTED host_quit`); no fim aparece o resultado e Enter ou Q saem. Antes do início o terminal continua normal para `iniciar`/`cancelar`. Nesse modo o log vai para `host_<nome>.log`, e `--ascii`/`--sem-cor` valem como no jogador. Sem terminal interativo (ex.: saída redirecionada), o host segue sem tela e a moto anda reto.
+
+**Tamanho e ritmo:** os scripts `scripts/host.*` usam arena 56×24 e 150 ms por ciclo (~6,7 casas/s) e o teclado. Para mudar, edite `--largura`, `--altura` e `--tick-ms` neles; os jogadores recebem tudo no `GAME_START`. A tela precisa de `altura + 4` linhas e `largura + 2` colunas (com célula dupla, `2 × largura + 4`): 56×24 pede 116×28, que cabe no padrão de 120×30 do Windows Terminal, PowerShell e `cmd.exe`.
 
 ## Cenários de falha (para o relatório)
 
@@ -98,9 +103,11 @@ Queda do host: Ctrl+C (ou `kill`) no host manda `GAME_ABORTED host_quit` a todos
 python3 -m unittest discover -s testes -v
 ```
 
-148 testes, cerca de 2 min. Os de integração sobem processos reais em localhost; `test_falhas.py` roda todos os cenários de `cenarios.py` e leva a maior parte do tempo, porque os timeouts são os de verdade (3 s). Para pular esses: `python3 -m unittest testes.test_tron testes.test_protocol testes.test_entrada testes.test_ui testes.test_jogador testes.test_integracao testes.test_lobby testes.test_jogador_integracao`.
+157 testes, cerca de 2 min. Os de integração sobem processos reais em localhost; `test_falhas.py` roda todos os cenários de `cenarios.py` e leva a maior parte do tempo, porque os timeouts são os de verdade (3 s). Para pular esses: `python3 -m unittest testes.test_tron testes.test_protocol testes.test_entrada testes.test_ui testes.test_jogador testes.test_host_tela testes.test_integracao testes.test_lobby testes.test_jogador_integracao`.
 
-Os testes do jogador usam teclado e terminal falsos: não exercitam o `msvcrt`, o `termios` nem o ANSI do console. Isso se confere à mão (roteiro no apêndice D.8 do protocolo v0.3).
+No Windows, `host_sai` do `test_falhas.py` falha: o cenário manda `SIGTERM`, que no Windows mata o processo na hora (`TerminateProcess`), então o host não chega a mandar o `GAME_ABORTED`. É limitação do cenário, não do host; no Linux ele passa.
+
+Os testes do jogador e da tela do host usam teclado e terminal falsos: não exercitam o `msvcrt`, o `termios` nem o ANSI do console. Isso se confere à mão (roteiro no apêndice D.8 do protocolo v0.3).
 
 ## Cenários de falha e várias máquinas
 
@@ -138,7 +145,7 @@ O host só conhece a interface `LigacaoLobby` (`lobby_link.py`). O `LobbyCliente
 2. **Moto eliminada fica na última célula válida.** A célula do choque (parede, rastro ou `head_on`) não é pintada, e no `head_on` a célula disputada fica vazia.
 3. **Erro antes do HELLO fecha a conexão**, qualquer que seja (`BAD_JSON`, `UNEXPECTED`...), sempre depois de mandar o `ERROR`.
 4. **Jogador que não lê** (mais de 256 KiB pendentes no host) é tratado como `timeout`, para não travar o host.
-5. **A moto do host não tem atraso de rede** (a entrada é local), então ele leva vantagem. Vale citar no relatório.
+5. **A moto do host não tem atraso de rede** (a entrada é local, com `--entrada teclado`), então ele leva vantagem. Vale citar no relatório.
 6. Com início automático, `MATCH_FULL` quase nunca aparece (a sala cheia já começa). Com início manual ele aparece normalmente.
 7. **Heartbeat com o lobby:** clientes mandam `PING` após 10 s sem falar com o lobby, e o lobby fecha conexões sem nenhuma mensagem por 60 s (`--inatividade`). O protocolo deixava isso como opcional.
 8. **Host e lobby na mesma máquina:** se o host chegou ao lobby por `127.0.0.1` sem `advertise_ip`, o `JOIN_OK` leva o IP local do lobby visto por quem pergunta (ideia do lobby original do colega).

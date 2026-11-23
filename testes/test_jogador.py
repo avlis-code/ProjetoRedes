@@ -1,8 +1,3 @@
-"""Testes do jogador.py com teclado, terminal, host e lobby falsos (apêndice D.8).
-
-Tempos reduzidos (Tempos abaixo), então a suíte leva poucos segundos.
-"""
-
 import logging
 import os
 import socket
@@ -12,17 +7,16 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import jogador  # noqa: E402
-import tela  # noqa: E402
-from falsos import HostFalso, LobbyFalso, TecladoFalso, TerminalFalso  # noqa: E402
-from jogador import Jogador, Tempos  # noqa: E402
+import jogador
+import tela
+from falsos import HostFalso, LobbyFalso, TecladoFalso, TerminalFalso
+from jogador import Jogador, Tempos
 
-logging.getLogger().addHandler(logging.NullHandler())  # sem log no stderr dos testes
+logging.getLogger().addHandler(logging.NullHandler())
 
 RAPIDO = Tempos(hello=0.5, vida=0.5, ping=0.1, passo=0.01, lista_salas=0.2,
                 ping_lobby=0.2, aviso=0.05)
 
-# arena 10 x 6: m = 1 -> id 0 em (1,1) RIGHT, id 1 em (8,4) LEFT, id 2 em (8,1) DOWN
 LARGURA, ALTURA = 10, 6
 JOGADORES = [{"id": 0, "name": "Ana"}, {"id": 1, "name": "Beto"}, {"id": 2, "name": "Caio"}]
 WELCOME = {"type": "WELCOME", "id": 1, "match_id": 3, "min_players": 3, "max_players": 4,
@@ -36,7 +30,6 @@ GAME_START = {"type": "GAME_START", "arena": {"width": LARGURA, "height": ALTURA
 
 
 def state(ciclo, dir_beto="LEFT", vivos=(0, 1, 2), eventos=()):
-    """STATE simples: só as cabeças pintadas (suficiente para o jogador)."""
     grid = [["."] * LARGURA for _ in range(ALTURA)]
     bikes = [{"id": 0, "x": 1 + ciclo % 8, "y": 1, "dir": "RIGHT", "alive": 0 in vivos},
              {"id": 1, "x": 8 - ciclo % 8, "y": 4, "dir": dir_beto, "alive": 1 in vivos},
@@ -112,7 +105,7 @@ class TestPartida(unittest.TestCase):
         self.assertIn("FIM DE PARTIDA", term.texto())
         self.assertIn("Vencedor: Beto", term.texto())
         self.assertTrue(teclado.saiu and term.saiu)
-        self.assertNotIn("lobby", tudo)  # sem lobby, a barra não fala dele
+        self.assertNotIn("lobby", tudo)
 
     def test_partida_completa_draw(self):
         host = HostFalso(ATE_O_JOGO + [("manda", state(2, vivos=())), ("manda", GAME_OVER_DRAW)])
@@ -162,7 +155,7 @@ class TestPartida(unittest.TestCase):
         j.executar()
         host.esperar_fim()
         self.assertIn({"type": "PONG", "t": 12345}, host.de_tipo("PONG"))
-        self.assertGreaterEqual(len(host.de_tipo("PING")), 1)  # 0,1 s sem enviar -> PING
+        self.assertGreaterEqual(len(host.de_tipo("PING")), 1)
 
 
 class TestFalhas(unittest.TestCase):
@@ -180,7 +173,7 @@ class TestFalhas(unittest.TestCase):
         _, term, _ = self.abortado(INICIO + [("manda", {"type": "GAME_ABORTED",
                                                         "reason": "cancelled", "cycle": None})],
                                    "O host cancelou a sala", em_fim=False)
-        self.assertNotIn("FIM DE PARTIDA", term.todos())  # antes do jogo: sem tela de FIM
+        self.assertNotIn("FIM DE PARTIDA", term.todos())
 
     def test_game_aborted_host_quit(self):
         _, term, _ = self.abortado(ATE_O_JOGO + [("manda", {"type": "GAME_ABORTED",
@@ -256,11 +249,11 @@ class TestFalhas(unittest.TestCase):
 class TestTurn(unittest.TestCase):
     def test_regras_do_turn(self):
         host = HostFalso(INICIO + [
-            ("pausa", 0.2),                                   # tecla na sala: não envia
-            ("manda", GAME_START), ("espera", "TURN", 1),     # contagem: cycle 0
-            ("manda", state(1)), ("espera", "TURN", 3),       # 3 teclas -> 2 TURN
-            ("manda", state(2)), ("espera", "TURN", 4),       # UP, UP -> 1 TURN
-            ("manda", state(3, dir_beto="RIGHT")), ("espera", "TURN", 6),  # inversão não filtrada
+            ("pausa", 0.2),
+            ("manda", GAME_START), ("espera", "TURN", 1),
+            ("manda", state(1)), ("espera", "TURN", 3),
+            ("manda", state(2)), ("espera", "TURN", 4),
+            ("manda", state(3, dir_beto="RIGHT")), ("espera", "TURN", 6),
             ("manda", state(4, vivos=(0, 2), eventos=[(1, "wall")])),
             ("pausa", 0.2), ("manda", GAME_OVER_WIN)])
         j, _, _ = sem_lobby(host, [
@@ -294,7 +287,7 @@ class TestLobby(unittest.TestCase):
         jogo_fora = [i for i in range(len(term.quadros))
                      if "lobby: fora" in term.texto(i) and "TRON  Beto" in term.texto(i)]
         self.assertTrue(jogo_fora, "a barra do jogo não mostrou lobby: fora")
-        self.assertIn("ciclo 2", term.texto(jogo_fora[-1]))  # o jogo seguiu
+        self.assertIn("ciclo 2", term.texto(jogo_fora[-1]))
         self.assertIn("Lobby indisponível", term.texto())
         self.assertTrue(j.linhas_saida[-1].startswith("RESULTADO WIN"))
 
@@ -342,7 +335,7 @@ class TestLobby(unittest.TestCase):
         self.assertEqual(j.executar(), 1)
         self.assertEqual(lobby.contagem["JOIN_MATCH"], 1)
         self.assertIn("HELLO", host.tipos())
-        self.assertIn("O host cancelou a sala", term.texto())  # aviso no menu
+        self.assertIn("O host cancelou a sala", term.texto())
         self.assertEqual(j.vezes_menu, 1)
 
     def test_lobby_inacessivel(self):

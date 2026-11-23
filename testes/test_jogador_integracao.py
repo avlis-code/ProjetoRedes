@@ -1,13 +1,3 @@
-"""Jogador (com teclado e terminal falsos) contra lobby.py, host.py e cliente_teste.py reais.
-
-Sobe lobby e host em subprocessos (localhost), um cliente_teste.py, e roda o
-Jogador neste processo, entrando pelo menu. A linha RESULTADO do jogador tem
-que ser igual à do host e à do cliente_teste (mesmo vencedor, mesmas
-eliminações, mesmo hash da arena).
-
-    python3 -m unittest testes.test_jogador_integracao -v
-"""
-
 import logging
 import os
 import sys
@@ -17,11 +7,11 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import jogador  # noqa: E402
-from falsos import TecladoFalso, TerminalFalso  # noqa: E402
-from jogador import Jogador, Tempos  # noqa: E402
-from test_integracao import esperar_porta, porta_livre, subir  # noqa: E402
-from test_lobby import Pedinte  # noqa: E402
+import jogador
+from falsos import TecladoFalso, TerminalFalso
+from jogador import Jogador, Tempos
+from test_integracao import esperar_porta, porta_livre, subir
+from test_lobby import Pedinte
 
 logging.getLogger().addHandler(logging.NullHandler())
 
@@ -90,7 +80,7 @@ class TestJogadorDeVerdade(unittest.TestCase):
         self.assertEqual(j.linhas_saida, [resultado_host])
         self.assertEqual(c_out, resultado_host)
         tudo = terminal.todos()
-        self.assertIn("TRON em rede", tudo)          # passou pelo menu
+        self.assertIn("TRON em rede", tudo)
         self.assertIn("Aguardando o host iniciar", tudo)
         self.assertIn("FIM DE PARTIDA", terminal.texto())
 

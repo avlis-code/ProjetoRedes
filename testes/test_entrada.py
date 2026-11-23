@@ -1,5 +1,3 @@
-"""Testes de entrada.py (sem teclado de verdade): decodificação e direções."""
-
 import io
 import os
 import subprocess
@@ -9,7 +7,7 @@ import unittest
 PASTA = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PASTA)
 
-from entrada import (ErroSemTerminal, Teclado, decodificar_bytes,  # noqa: E402
+from entrada import (ErroSemTerminal, Teclado, decodificar_bytes,
                      decodificar_windows, tecla_para_direcao)
 
 
@@ -44,7 +42,7 @@ class TestDecodificarBytes(unittest.TestCase):
 
     def test_sequencia_desconhecida_ignorada(self):
         self.assertEqual(decodificar_bytes(b"\x1b[5~q"), ["q"])
-        self.assertEqual(decodificar_bytes(b"\x1b[1;5A"), [])  # Ctrl+seta: não é seta simples
+        self.assertEqual(decodificar_bytes(b"\x1b[1;5A"), [])
 
     def test_controles_e_utf8_invalido(self):
         self.assertEqual(decodificar_bytes(b"\t\x7f"), [])
@@ -66,8 +64,8 @@ class TestDecodificarWindows(unittest.TestCase):
 
     def test_prefixo_sozinho_ou_desconhecido(self):
         self.assertEqual(decodificar_windows(["\xe0"]), [])
-        self.assertEqual(decodificar_windows(["\x00", ";"]), [])  # F1
-        self.assertEqual(decodificar_windows(["\xe0", "G", "w"]), ["w"])  # Home, depois w
+        self.assertEqual(decodificar_windows(["\x00", ";"]), [])
+        self.assertEqual(decodificar_windows(["\xe0", "G", "w"]), ["w"])
 
 
 class TestDirecao(unittest.TestCase):
@@ -89,7 +87,6 @@ class TestModulo(unittest.TestCase):
                   % PASTA)
         r = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, timeout=20)
         self.assertEqual(r.returncode, 0, r.stderr)
-        # msvcrt pode já vir carregado pelo próprio Python no Windows; termios/tty nunca
         _, termios, tty = r.stdout.split()
         self.assertEqual((termios, tty), ("False", "False"))
 
