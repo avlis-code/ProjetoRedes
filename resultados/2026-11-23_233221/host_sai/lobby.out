@@ -1,0 +1,28 @@
+23:33:36 [lobby] lobby escutando em 0.0.0.0:35583
+23:33:36 [lobby] conexão de 127.0.0.1:47106
+23:33:36 [lobby] desconectado: 127.0.0.1:47106
+23:33:36 [lobby] conexão de 127.0.0.1:47114
+23:33:36 [lobby] registrado: Ana (127.0.0.1:47114)
+23:33:36 [lobby] Ana criou partida por 127.0.0.1 sem advertise_ip: cada jogador receberá o IP desta máquina pelo qual ele chegou ao lobby
+23:33:36 [lobby] partida 1 'sala de Ana' criada por Ana (host 127.0.0.1:43007)
+23:33:36 [lobby] partida 1: jogadores ['Ana']
+23:33:36 [lobby] conexão de 127.0.0.1:47118
+23:33:36 [lobby] registrado: Beto (127.0.0.1:47118)
+23:33:36 [lobby] Beto pediu para entrar na partida 1
+23:33:36 [lobby] partida 1: jogadores ['Ana', 'Beto']
+23:33:36 [lobby] conexão de 127.0.0.1:47126
+23:33:36 [lobby] registrado: Caio (127.0.0.1:47126)
+23:33:36 [lobby] Caio pediu para entrar na partida 1
+23:33:36 [lobby] partida 1: jogadores ['Ana', 'Beto', 'Caio']
+23:33:36 [lobby] conexão de 127.0.0.1:47132
+23:33:36 [lobby] registrado: Duda (127.0.0.1:47132)
+23:33:36 [lobby] Duda pediu para entrar na partida 1
+23:33:36 [lobby] partida 1: jogadores ['Ana', 'Beto', 'Caio', 'Duda']
+23:33:36 [lobby] partida 1 iniciada com ['Ana', 'Beto', 'Caio', 'Duda']
+23:33:38 [lobby] partida 1 removida (terminou, vencedor None)
+23:33:38 [lobby] desconectado: Ana
+23:33:38 [lobby] desconectado: Duda
+23:33:38 [lobby] desconectado: Caio
+23:33:38 [lobby] desconectado: Beto
+23:33:38 [lobby] conexão de 127.0.0.1:47134
+23:33:38 [lobby] registrado: olheiro3 (127.0.0.1:47134)
