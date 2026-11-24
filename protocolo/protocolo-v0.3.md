@@ -2,6 +2,15 @@
 
 > Opção escolhida: **Opção 1, Tron com host autoritativo**.
 
+**Integrantes**
+
+| Nome | Matrícula |
+|---|---|
+| Mateus Santos da Silva | 190018011 |
+| Matheus Rodrigues da Silva | 222007012 |
+| Pablo Cunha de Jesus | 222014910 |
+| Willian Adrian Cardoso Paz Leandro | 241034596 |
+
 ## Histórico de mudanças
 
 | Versão | Data | Mudanças |

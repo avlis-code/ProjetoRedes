@@ -1,6 +1,15 @@
 # Tron em rede: lobby + host autoritativo
 
-Python 3.8+ só com a biblioteca padrão. Segue `protocolo/protocolo.md` (rascunho v0.1).
+**Integrantes**
+
+| Nome | Matrícula |
+|---|---|
+| Mateus Santos da Silva | 190018011 |
+| Matheus Rodrigues da Silva | 222007012 |
+| Pablo Cunha de Jesus | 222014910 |
+| Willian Adrian Cardoso Paz Leandro | 241034596 |
+
+Python 3.8+ só com a biblioteca padrão. Segue `protocolo/protocolo-v0.3.md`.
 
 ## Arquivos
 

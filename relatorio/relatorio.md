@@ -1,5 +1,14 @@
 # Tron em rede: relatório
 
+**Integrantes**
+
+| Nome | Matrícula |
+|---|---|
+| Mateus Santos da Silva | 190018011 |
+| Matheus Rodrigues da Silva | 222007012 |
+| Pablo Cunha de Jesus | 222014910 |
+| Willian Adrian Cardoso Paz Leandro | 241034596 |
+
 Escolhemos a Opção 1 do trabalho: um Tron para 3 ou 4 jogadores, com host autoritativo, TCP em todas as conexões e um lobby cliente/servidor para as pessoas se encontrarem. O programa é todo em Python 3, só com a biblioteca padrão.
 
 A especificação completa do protocolo está em `protocolo/protocolo-v0.3.md`. Este relatório trata sobre o desenvolvimento: o que cada um faz, por que escolhemos cada protocolo e como testamos.
@@ -8,10 +17,10 @@ O protocolo passou por três versões, e cada uma nasceu de algo que aprendemos.
 
 | Parte                         | Responsável       | Seção |
 | ----------------------------- | ----------------- | ----- |
-| 1. Lobby e framing            | Willian           | 2     |
-| 2. Host autoritativo          | Mateus Santos     | 3     |
-| 3. Cliente e jogador          | Pablo             | 4     |
-| 4. Falhas, testes e relatório | Matheus Rodrigues | 5 e 6 |
+| 1. Lobby e framing            | Willian Adrian Cardoso Paz Leandro | 2     |
+| 2. Host autoritativo          | Mateus Santos da Silva | 3     |
+| 3. Cliente e jogador          | Pablo Cunha de Jesus | 4     |
+| 4. Falhas, testes e relatório | Matheus Rodrigues da Silva | 5 e 6 |
 
 ## 1. Arquitetura
 
