@@ -378,7 +378,7 @@ def _host_cai(c: Cenario, sig, rotulo: str, padrao_jog: str, limite: tuple[float
                  f"{p.nome}: {p.abortada}")
         a = c.atraso(rotulo, p, r"partida abortada")
         if a is not None:
-            c.checar(limite[0] <= a <= limite[1],
+            c.checar(limite[0] - 0.001 <= a <= limite[1],
                      f"{p.nome} detecta em {a * 1000:.0f} ms "
                      f"(esperado entre {limite[0] * 1000:.0f} e {limite[1] * 1000:.0f} ms)")
     c.checar(not any(p.resultado for p in jog), "ninguém declara vencedor")

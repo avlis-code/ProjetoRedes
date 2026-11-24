@@ -2,7 +2,7 @@
 
 Escolhemos a Opção 1 do trabalho: um Tron para 3 ou 4 jogadores, com host autoritativo, TCP em todas as conexões e um lobby cliente/servidor para as pessoas se encontrarem. O programa é todo em Python 3, só com a biblioteca padrão.
 
-A especificação completa do protocolo está em `protocolo/protocolo-v0.3.md`. o presente relarório discorre sobre o desenvolvimento: o que cada um faz, por que escolhemos cada protocolo e como testamos.
+A especificação completa do protocolo está em `protocolo/protocolo-v0.3.md`. Este relatório trata sobre o desenvolvimento: o que cada um faz, por que escolhemos cada protocolo e como testamos.
 
 O protocolo passou por três versões, e cada uma nasceu de algo que aprendemos. A v0.1 foi o rascunho, escrito antes de qualquer código. A v0.2 registrou o que só descobrimos ao implementar o host e o lobby (por exemplo, que uma virada inválida não deve "gastar" o ciclo). A v0.3 chegou com o jogador de teclado: não mudou nenhuma mensagem, mas passou a descrever como o jogador se comporta tela por tela (apêndice D). O histórico completo está no começo do documento.
 
@@ -256,14 +256,16 @@ Rodada de 22/11/2026, macOS, localhost, `tick_ms = 100` (200 no cenário de time
 | Lobby trava      | `SIGSTOP` no lobby no meio do jogo       | partida vai até o fim normalmente; o host sai 6 s depois dos jogadores (1 s de espera do fim + 5 s esperando o `END_OK`)                                 |                |
 | Lobby fora do ar | lobby não existe                         | host não cria a partida (código 1); jogador desiste com a mensagem do erro                                                                               | imediata       |
 
-Repetimos todos os cenários em 23/11/2026, no Linux, já com o jogador com teclado e a tela do host integrados, e os resultados foram os mesmos: eliminações nos mesmos ciclos, timeout em 3,00 s, host travado percebido entre 3010 e 3014 ms, queda na sala percebida em 1 ms e o host saindo 6,0 s depois dos jogadores com o lobby travado.
+Na noite de 23/11/2026 rodamos tudo de novo no macOS, com o código final de todas as partes: 157 testes da suíte passando e os 11 cenários aprovados, com os mesmos ciclos de eliminação, timeout em 3,00 s e host travado percebido entre 2974 e 3018 ms. Também repetimos todos os cenários em 23/11/2026 no Linux, já com o jogador com teclado e a tela do host integrados, e os resultados foram os mesmos: eliminações nos mesmos ciclos, timeout em 3,00 s, host travado percebido entre 3010 e 3014 ms, queda na sala percebida em 1 ms e o host saindo 6,0 s depois dos jogadores com o lobby travado.
 
 RTT jogador ↔ host medido pelo `PING`/`PONG`: mediana 0 ms, máximo 1 ms em localhost. Nenhuma virada foi aplicada com atraso. Entre máquinas na mesma rede Wi-Fi, o `rede.py testar` mede o valor real.
+
+Observações que os testes revelaram:
 
 1. **Host travado deixa uma partida fantasma no lobby.** Com `SIGSTOP`, a conexão TCP do host com o lobby não fecha, então o lobby continua listando a partida até o seu próprio timeout de inatividade (60 s). Não afeta ninguém que está jogando, mas um jogador novo poderia tentar entrar e receber erro de conexão.
 2. **A detecção de timeout no host varia entre 2 e 3 s depois do travamento.** O relógio conta a partir do último byte recebido, e o jogador pode ter mandado o último `PING` até 1 s antes de travar.
 3. **Um jogador travado anda reto até o timeout.** O host continua movendo a moto dele na última direção. Numa arena pequena ela pode bater na parede antes dos 3 s e ser eliminada por `wall`, e não por `timeout`. Por isso o cenário de timeout usa arena 80 × 40 e ciclos de 200 ms.
-4. **O cenário `host_sai` às vezes reprova sem motivo real.** O horário do log tem só milissegundos, mas o instante da falha é guardado com microssegundos. Quando o jogador percebe no mesmo milissegundo, a conta dá algo como −0,4 ms e a checagem "entre 0 e 1000 ms" reprova. O host está certo; quem precisa de ajuste é a medida em `cenarios.py`. No Windows esse cenário falha sempre por outro motivo: lá o `SIGTERM` mata o processo na hora, e o host não chega a mandar o `GAME_ABORTED`.
+4. **O cenário `host_sai` reprovava às vezes sem motivo real.** O horário do log tem só milissegundos, mas o instante da falha é guardado com microssegundos. Quando o jogador percebia no mesmo milissegundo, a conta dava algo como −0,4 ms e a checagem "entre 0 e 1000 ms" reprovava. O host estava certo; corrigimos a medida em `cenarios.py`, que agora aceita 1 ms de folga. No Windows esse cenário continua falhando por outro motivo: lá o `SIGTERM` mata o processo na hora, e o host não chega a mandar o `GAME_ABORTED`.
 
 ### 6.3 Perguntas sobre situações não demonstradas
 
@@ -293,9 +295,61 @@ Roteiro usado:
 
 Para demonstrar a queda do lobby, feche o terminal do lobby com a partida em andamento: o jogo continua, e em até 10 s a barra dos jogadores mostra `lobby: fora`. Para a queda de rede de um jogador, desligue o Wi-Fi da máquina dele: ele vê "conexão com o host perdida" em 3 s, e os outros veem a eliminação dele por `timeout`. Para as falhas simuladas (`--cair-no-ciclo` etc.), use o `cliente_teste.py` diretamente.
 
-## 7. Conclusão
+### 6.5 Exemplos de execução
 
-7. Conclusão
+Trechos reais da rodada de 23/11/2026 (`python3 cenarios.py`, pasta `resultados/2026-11-23_232344`). Cada jogador imprime, ao fim, uma linha `RESULTADO` com o vencedor, as eliminações (`nome@ciclo:motivo`) e um hash da arena final. Se dois participantes vissem colisões diferentes, o hash seria diferente.
+
+**Partida completa.** Ana cria a sala, Beto, Caio e Duda entram pelo lobby e a partida vai até o fim. Log do host:
+
+```
+23:23:44.580 [Ana] host: GAME_START com ['Ana', 'Beto', 'Caio', 'Duda']; ciclo 1 em 1100 ms
+23:23:48.981 [Ana] host: ciclo 34: Caio eliminado (trail)
+23:23:50.281 [Ana] host: ciclo 47: Ana eliminado (trail)
+23:23:50.281 [Ana] host: a moto do host foi eliminada; host continua como espectador
+23:23:51.980 [Ana] host: ciclo 64: Duda eliminado (trail)
+23:23:52.983 [Ana] lobby: lobby confirmou END_MATCH
+```
+
+Saída dos quatro processos (Ana, Beto, Caio e Duda), idêntica:
+
+```
+RESULTADO WIN vencedor=Beto ciclo=64 eliminacoes=Caio@34:trail,Ana@47:trail,Duda@64:trail arena=1b8afff87eae
+```
+
+**Desconexão de um jogador.** Beto fecha o socket depois do `STATE` do ciclo 10. O host percebe no mesmo milissegundo, elimina a moto no ciclo seguinte e a partida continua com os outros três:
+
+```
+23:24:03.215 [Beto] FALHA SIMULADA queda no ciclo 10
+23:24:03.215 [Ana] host: Beto caiu (disconnect): eliminado no próximo ciclo
+23:24:03.314 [Ana] host: ciclo 11: Beto eliminado (disconnect)
+23:24:09.213 [Ana] host: ciclo 70: Duda eliminado (trail)
+```
+
+Saída de Ana, Caio e Duda:
+
+```
+RESULTADO WIN vencedor=Caio ciclo=187 eliminacoes=Beto@11:disconnect,Duda@70:trail,Ana@187:trail arena=99aabdfc1ab0
+```
+
+**Falha do lobby com a partida em andamento.** O processo do lobby é morto (`SIGKILL`) logo depois do `START_MATCH`. A última linha do lobby é `partida 1 iniciada com ['Ana', 'Beto', 'Caio', 'Duda']`. A partida segue sem ele, e o host só nota a ausência ao tentar avisar o fim:
+
+```
+23:25:07.811 [Ana] host: GAME_START com ['Ana', 'Beto', 'Caio', 'Duda']; ciclo 1 em 1100 ms
+23:25:12.212 [Ana] host: ciclo 34: Caio eliminado (trail)
+23:25:13.112 [Ana] host: ciclo 43: Duda eliminado (trail)
+23:25:13.312 [Ana] host: ciclo 45: Beto eliminado (trail)
+23:25:14.314 [Ana] lobby: conexão com o lobby perdida (lobby fechou a conexão); a partida continua sem ele
+```
+
+Saída dos quatro processos:
+
+```
+RESULTADO WIN vencedor=Ana ciclo=45 eliminacoes=Caio@34:trail,Duda@43:trail,Beto@45:trail arena=6b5bc76ef68a
+```
+
+Para reproduzir: `python3 cenarios.py completa desconexao lobby_cai` (ou só `python3 cenarios.py` para todos). O resumo com cada checagem fica em `resultados/<data>/resumo.md`, e os logs de cada participante na mesma pasta.
+
+## 7. Conclusão
 
 ### 7.1 Como o trabalho andou
 

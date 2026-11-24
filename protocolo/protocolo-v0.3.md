@@ -7,8 +7,8 @@
 | Versão | Data | Mudanças |
 |---|---|---|
 | v0.1 | 2026-11-18 | Rascunho inicial. |
-| v0.2 | 2026-11-22 | Ajustes vindos da implementação (código em `codigo/`), listados abaixo. |
-| v0.3 | 2026-11-24 | Jogador com teclado e tela, host jogando pelo teclado e fechamento educado das conexões, listados abaixo. |
+| v0.2 | 2026-11-22 | Ajustes vindos da implementação, listados abaixo. |
+| v0.3 | 2026-11-23 | Jogador com teclado e tela, host jogando pelo teclado e fechamento educado das conexões, listados abaixo. |
 
 Mudanças da v0.2:
 1. Virada inválida (inversão ou mesma direção) não gasta o ciclo (seção 3.4, D11).
